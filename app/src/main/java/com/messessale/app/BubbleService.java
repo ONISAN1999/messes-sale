@@ -20,6 +20,7 @@ import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.HorizontalScrollView;
@@ -50,12 +51,18 @@ public class BubbleService extends Service {
     private String filter = "ทั้งหมด";
     private String place = "";
 
-    private LinearLayout bodyBox, staffRow, placeChipRow;
+    private LinearLayout bodyBox, staffRow, staffPay, placeChipRow;
+    private ScrollView bodyScroll;
     private TextView totalText, segCustomer, segStaff;
     private EditText orderNoInput, placeInput;
     private List<TextView> filterChips = new ArrayList<>();
     private int shipFee = -1; // -1 = ยังไม่เลือก, 0 = ส่งฟรี
     private static final int[] SHIP_FEES = {0, 10, 20, 30, 40};
+
+    private String payChannel = "";
+    private String payStatus = "";
+    private static final String[] PAY_CHANNELS = {"เงินสด", "โอนปกติ", "คนละครึ่ง"};
+    private static final String[] PAY_STATUS = {"ชำระแล้ว", "ชำระหน้าร้าน", "สแกนหน้าลูกค้า"};
 
     private static final String CH = "bubble_ch";
     private static final int C_SHRIMP = 0xFFFFB3C6;
@@ -209,8 +216,14 @@ public class BubbleService extends Service {
         LinearLayout.LayoutParams o1 = lpw(1); o1.rightMargin = dp(this, 7);
         staffRow.addView(orderNoInput, o1);
         staffRow.addView(placeStaff, lpw(2));
-        LinearLayout.LayoutParams stLp = lp(MATCH, WRAP); stLp.topMargin = dp(this, 9);
+        LinearLayout.LayoutParams stLp = lp(MATCH, WRAP); stLp.topMargin = dp(this, 11);
         panelView.addView(staffRow, stLp);
+
+        // ---- ช่องทาง/สถานะการชำระ (เฉพาะโหมดแจ้งพนักงาน) ----
+        staffPay = col(this);
+        LinearLayout.LayoutParams spLp = lp(MATCH, WRAP); spLp.topMargin = dp(this, 10);
+        panelView.addView(staffPay, spLp);
+        buildPayRows();
 
         // ---- filter chips ----
         HorizontalScrollView fScroll = new HorizontalScrollView(this);
@@ -230,16 +243,21 @@ public class BubbleService extends Service {
             fRow.addView(c);
         }
         fScroll.addView(fRow);
-        LinearLayout.LayoutParams fLp = lp(MATCH, WRAP); fLp.topMargin = dp(this, 10);
+        LinearLayout.LayoutParams fLp = lp(MATCH, WRAP); fLp.topMargin = dp(this, 12);
         panelView.addView(fScroll, fLp);
 
         // ---- body (masonry) ----
         ScrollView sv = new ScrollView(this);
+        bodyScroll = sv;
         bodyBox = col(this);
         sv.addView(bodyBox);
-        LinearLayout.LayoutParams svLp = lp(MATCH, dp(this, 300));
-        svLp.topMargin = dp(this, 9);
+        LinearLayout.LayoutParams svLp = lp(MATCH, dp(this, BODY_TALL));
+        svLp.topMargin = dp(this, 11);
         panelView.addView(sv, svLp);
+
+        // เวลาแป้นพิมพ์ขึ้น ให้ย่อพื้นที่รายการ ปุ่มคัดลอกจะไม่โดนบัง
+        watchKeyboard(orderNoInput);
+        watchKeyboard(placeStaff);
 
         // ---- actions ----
         LinearLayout acts = row(this);
@@ -261,10 +279,63 @@ public class BubbleService extends Service {
         panelParams = new WindowManager.LayoutParams(MATCH, WRAP, wtype(),
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, PixelFormat.TRANSLUCENT);
         panelParams.gravity = Gravity.BOTTOM;
+        panelParams.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
 
         refreshSeg(); rebuildBody(); refreshTotal();
         wm.addView(panelView, panelParams);
         panelOpen = true;
+    }
+
+    private static final int BODY_TALL = 300;
+    private static final int BODY_SHORT = 150;
+
+    /** ย่อ/ขยายพื้นที่รายการเมื่อแป้นพิมพ์ขึ้น-ลง */
+    private void setBodyHeight(int dpH) {
+        if (bodyScroll == null) return;
+        ViewGroup.LayoutParams p = bodyScroll.getLayoutParams();
+        int h = dp(this, dpH);
+        if (p != null && p.height != h) { p.height = h; bodyScroll.setLayoutParams(p); }
+    }
+
+    private void watchKeyboard(EditText e) {
+        e.setOnFocusChangeListener((v, has) -> setBodyHeight(has ? BODY_SHORT : BODY_TALL));
+    }
+
+    /** แถวชิป: ช่องทางที่ลูกค้าชำระ + สถานะชำระ */
+    private void buildPayRows() {
+        staffPay.removeAllViews();
+        staffPay.addView(payRow("ช่องทางที่ลูกค้าชำระ", PAY_CHANNELS, true), lp(MATCH, WRAP));
+        View gap = new View(this);
+        staffPay.addView(gap, lp(MATCH, dp(this, 9)));
+        staffPay.addView(payRow("สถานะชำระ", PAY_STATUS, false), lp(MATCH, WRAP));
+    }
+
+    private View payRow(String label, String[] options, boolean isChannel) {
+        LinearLayout box = col(this);
+        box.addView(text(this, label, 11, false, WHITE_DIM));
+
+        HorizontalScrollView sv = new HorizontalScrollView(this);
+        sv.setHorizontalScrollBarEnabled(false);
+        LinearLayout r = row(this);
+        for (String opt : options) {
+            final String o = opt;
+            boolean on = isChannel ? o.equals(payChannel) : o.equals(payStatus);
+            TextView c = chip(this, o, on);
+            if (on) { c.setBackground(glass(this, 0xFFFFB3C6, 12, 0)); c.setTextColor(0xFF4B1528); }
+            c.setPadding(dp(this,13), dp(this,7), dp(this,13), dp(this,7));
+            LinearLayout.LayoutParams cp = lp(WRAP, WRAP); cp.rightMargin = dp(this,6);
+            c.setLayoutParams(cp);
+            Fx.onTap(c, () -> {
+                if (isChannel) payChannel = o.equals(payChannel) ? "" : o;
+                else payStatus = o.equals(payStatus) ? "" : o;
+                buildPayRows();
+            });
+            r.addView(c);
+        }
+        sv.addView(r);
+        LinearLayout.LayoutParams sp = lp(MATCH, WRAP); sp.topMargin = dp(this, 5);
+        box.addView(sv, sp);
+        return box;
     }
 
     private void closePanel() {
@@ -416,8 +487,8 @@ public class BubbleService extends Service {
     /* ---- delivery block ---- */
     private View shipBlock(MenuData.Cat cat) {
         LinearLayout box = col(this);
-        box.setBackground(glass(this, 0x249FE1CB, 12, 0x669FE1CB));
-        box.setPadding(dp(this,9), dp(this,9), dp(this,9), dp(this,9));
+        box.setBackground(glass(this, 0x249FE1CB, 14, 0x669FE1CB));
+        box.setPadding(dp(this,12), dp(this,12), dp(this,12), dp(this,12));
 
         // เลือกค่าส่ง: ส่งฟรี / 10 / 20 / 30 / 40
         box.addView(text(this, "เลือกค่าส่ง", 11.5f, false, WHITE_DIM));
@@ -436,12 +507,14 @@ public class BubbleService extends Service {
             feeRow.addView(c);
         }
         fsv.addView(feeRow);
-        LinearLayout.LayoutParams fp = lp(MATCH, WRAP); fp.topMargin = dp(this,6);
+        LinearLayout.LayoutParams fp = lp(MATCH, WRAP);
+        fp.topMargin = dp(this,7); fp.bottomMargin = dp(this,11);
         box.addView(fsv, fp);
 
         // ช่องส่งที่ไหน
         EditText placeField = input(this, "ส่งที่ไหน เช่น Tara");
         placeField.setText(place);
+        watchKeyboard(placeField);
         placeField.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s,int a,int b,int c) {}
             @Override public void onTextChanged(CharSequence s,int a,int b,int c) { place = s.toString(); }
@@ -475,7 +548,7 @@ public class BubbleService extends Service {
         });
         placeChipRow.addView(save);
         psv.addView(placeChipRow);
-        LinearLayout.LayoutParams pl = lp(MATCH, WRAP); pl.topMargin = dp(this, 7);
+        LinearLayout.LayoutParams pl = lp(MATCH, WRAP); pl.topMargin = dp(this, 10);
         box.addView(psv, pl);
 
         return box;
@@ -528,14 +601,26 @@ public class BubbleService extends Service {
         tv.setPadding(0, dp(this, 3), 0, 0);
         card.addView(tv);
 
-        // แถบท้ายการ์ด — บอกว่ากดแล้วคัดลอกทันที
+        // แถบท้ายการ์ด: แตะ = คัดลอก, ปุ่มปากกามุมขวา = แก้ไข
+        LinearLayout foot = row(this);
         TextView hint = text(this, c.images.isEmpty() ? "📋 แตะเพื่อคัดลอก" : "🚀 แตะเพื่อส่งพร้อมรูป",
                 10.5f, true, 0xF2FFFFFF);
         hint.setGravity(Gravity.CENTER);
         hint.setBackground(glass(this, 0x33000000, 9, 0x40FFFFFF));
-        hint.setPadding(0, dp(this,5), 0, dp(this,5));
-        LinearLayout.LayoutParams hp = lp(MATCH, WRAP); hp.topMargin = dp(this, 8);
-        card.addView(hint, hp);
+        hint.setPadding(0, dp(this,6), 0, dp(this,6));
+        foot.addView(hint, lpw(1));
+
+        TextView pen = text(this, "✏️", 12, true, WHITE);
+        pen.setGravity(Gravity.CENTER);
+        pen.setBackground(glass(this, 0x40000000, 9, 0x59FFFFFF));
+        pen.setPadding(dp(this,10), dp(this,6), dp(this,10), dp(this,6));
+        LinearLayout.LayoutParams pp = lp(WRAP, WRAP); pp.leftMargin = dp(this,6);
+        pen.setLayoutParams(pp);
+        Fx.onTap(pen, () -> openCardEditor(idx));
+        foot.addView(pen);
+
+        LinearLayout.LayoutParams hp = lp(MATCH, WRAP); hp.topMargin = dp(this, 9);
+        card.addView(foot, hp);
 
         // แตะการ์ด = คัดลอกทันที (มีรูป = คัดลอก + เปิดแชร์รูป)
         Fx.onCopyTap(card, () -> {
@@ -643,7 +728,9 @@ public class BubbleService extends Service {
         segCustomer.setTextColor(mode == MsgBuilder.MODE_CUSTOMER ? INK : WHITE);
         segStaff.setBackground(mode == MsgBuilder.MODE_STAFF ? glass(this, WHITE, 12, 0) : null);
         segStaff.setTextColor(mode == MsgBuilder.MODE_STAFF ? INK : WHITE);
-        staffRow.setVisibility(mode == MsgBuilder.MODE_STAFF ? View.VISIBLE : View.GONE);
+        int vis = mode == MsgBuilder.MODE_STAFF ? View.VISIBLE : View.GONE;
+        staffRow.setVisibility(vis);
+        if (staffPay != null) staffPay.setVisibility(vis);
     }
 
     private void refreshFilters() {
@@ -660,9 +747,16 @@ public class BubbleService extends Service {
 
     /* ================= helpers ================= */
     private String payLine() {
-        return mode == MsgBuilder.MODE_STAFF
-                ? Store.prefs(this).getString("paystaff", "ลูกค้าโอนจ่ายปกติแล้ว")
-                : Store.prefs(this).getString("payline", "ชำระเงินคนละครึ่งหรือโอนธรรมดาครับ");
+        if (mode == MsgBuilder.MODE_STAFF) {
+            StringBuilder s = new StringBuilder();
+            if (!payChannel.isEmpty()) s.append("ช่องทางชำระ : ").append(payChannel);
+            if (!payStatus.isEmpty()) {
+                if (s.length() > 0) s.append("\n");
+                s.append("สถานะ : ").append(payStatus);
+            }
+            return s.toString();
+        }
+        return Store.prefs(this).getString("payline", "ชำระเงินคนละครึ่งหรือโอนธรรมดาครับ");
     }
 
     private void copy(String txt, String msg) {

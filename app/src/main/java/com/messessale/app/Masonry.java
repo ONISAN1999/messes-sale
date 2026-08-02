@@ -29,9 +29,9 @@ public class Masonry {
         LinearLayout right = col(c);
 
         LinearLayout.LayoutParams lp1 = lpw(1);
-        lp1.rightMargin = dp(c, 4);
+        lp1.rightMargin = dp(c, 6);
         LinearLayout.LayoutParams lp2 = lpw(1);
-        lp2.leftMargin = dp(c, 4);
+        lp2.leftMargin = dp(c, 6);
 
         row.addView(left, lp1);
         row.addView(right, lp2);
@@ -40,7 +40,7 @@ public class Masonry {
         for (int i = 0; i < count; i++) {
             View card = b.build(i);
             LinearLayout.LayoutParams cp = lp(MATCH, WRAP);
-            cp.bottomMargin = dp(c, 8);
+            cp.bottomMargin = dp(c, 12);
             if (hLeft <= hRight) {
                 left.addView(card, cp);
                 hLeft += b.weight(i);
@@ -55,7 +55,7 @@ public class Masonry {
     /** หัวข้อหมวดคั่นในกริด */
     public static View header(Context c, String title, int color) {
         android.widget.TextView t = text(c, title, 11.5f, true, color);
-        t.setPadding(dp(c, 2), dp(c, 4), 0, dp(c, 7));
+        t.setPadding(dp(c, 2), dp(c, 10), 0, dp(c, 9));
         return t;
     }
 }

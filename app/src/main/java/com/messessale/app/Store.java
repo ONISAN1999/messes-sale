@@ -71,8 +71,7 @@ public class Store {
         List<Card> out = new ArrayList<>();
         out.add(new Card("Map ร้าน", "แผนที่ร้าน: https://maps.app.goo.gl/"));
         out.add(new Card("เมนูกุ้งวันนี้", MsgBuilder.promo()));
-        out.add(new Card("เวลาเปิด-ปิด", "ร้านเปิด 10:00 - 21:00 น. ทุกวันครับ"));
-        out.add(new Card("เลขบัญชี", "ธ.กสิกรไทย 123-4-56789-0 บังฟาน"));
+        out.add(new Card("เวลาเปิด-ปิด", "ร้านเปิด 10.00 - 00.00 น. ทุกวันครับ"));
         return out;
     }
 
