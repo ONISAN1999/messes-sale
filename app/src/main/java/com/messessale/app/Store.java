@@ -112,6 +112,54 @@ public class Store {
         savePlaces(c, places);
     }
 
+    /* ---------------- เมนู (แก้ไขได้) ---------------- */
+
+    private static final String K_MENU = "menu_v1";
+
+    /** โหลดเมนู — ถ้ายังไม่เคยแก้ ใช้ค่าตั้งต้นจาก MenuData */
+    public static List<MenuData.Cat> loadMenu(Context c) {
+        String raw = prefs(c).getString(K_MENU, null);
+        if (raw == null) return MenuData.build();
+        try {
+            List<MenuData.Cat> out = new ArrayList<>();
+            JSONArray arr = new JSONArray(raw);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject co = arr.getJSONObject(i);
+                MenuData.Cat cat = MenuData.newCat(co.optString("name"));
+                JSONArray items = co.optJSONArray("items");
+                if (items != null)
+                    for (int j = 0; j < items.length(); j++) {
+                        JSONObject io = items.getJSONObject(j);
+                        cat.items.add(MenuData.newItem(io.optString("name"),
+                                io.optInt("price"), io.optBoolean("custom")));
+                    }
+                out.add(cat);
+            }
+            return out.isEmpty() ? MenuData.build() : out;
+        } catch (Exception e) { return MenuData.build(); }
+    }
+
+    public static void saveMenu(Context c, List<MenuData.Cat> cats) {
+        JSONArray arr = new JSONArray();
+        try {
+            for (MenuData.Cat cat : cats) {
+                JSONObject co = new JSONObject();
+                co.put("name", cat.name);
+                JSONArray items = new JSONArray();
+                for (MenuData.Item it : cat.items) {
+                    JSONObject io = new JSONObject();
+                    io.put("name", it.name);
+                    io.put("price", it.price);
+                    io.put("custom", it.custom);
+                    items.put(io);
+                }
+                co.put("items", items);
+                arr.put(co);
+            }
+        } catch (Exception ignored) {}
+        prefs(c).edit().putString(K_MENU, arr.toString()).apply();
+    }
+
     /* ---------------- ความใสของแผง ---------------- */
 
     public static int alpha(Context c) { return prefs(c).getInt(K_ALPHA, 92); }

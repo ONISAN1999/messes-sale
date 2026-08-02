@@ -34,6 +34,29 @@ public class UI {
         return g;
     }
 
+    /** พื้นหลังไล่สี (การ์ดสไตล์ Masonry สีสด) */
+    public static GradientDrawable grad(Context c, int c1, int c2, float radius) {
+        GradientDrawable g = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR, new int[]{c1, c2});
+        g.setCornerRadius(dp(c, radius));
+        return g;
+    }
+
+    /** จานสีการ์ด: ส้ม / ฟ้า / เขียว / ม่วง / เทา / แดง */
+    public static final int[][] CARD_GRADS = {
+            {0xFFF7A23B, 0xFFEF6C3A},
+            {0xFF4FB3F7, 0xFF2E7FE8},
+            {0xFF54C88A, 0xFF2FA36B},
+            {0xFFB07BF0, 0xFF8A5BE0},
+            {0xFF8A93A6, 0xFF5F6879},
+            {0xFFF4736B, 0xFFE2504F},
+    };
+
+    public static GradientDrawable cardGrad(Context c, int index, float radius) {
+        int[] p = CARD_GRADS[Math.abs(index) % CARD_GRADS.length];
+        return grad(c, p[0], p[1], radius);
+    }
+
     /** ปุ่มไล่สีชมพู-ส้ม */
     public static GradientDrawable primary(Context c, float radius) {
         GradientDrawable g = new GradientDrawable(

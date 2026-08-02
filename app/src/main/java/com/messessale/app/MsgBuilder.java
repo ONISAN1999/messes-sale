@@ -16,13 +16,19 @@ public class MsgBuilder {
      * @param payLine  ข้อความท้าย เช่น "ชำระเงินคนละครึ่งหรือโอนธรรมดาครับ"
      */
     public static String build(List<MenuData.Cat> cats, int mode, String orderNo, String place, String payLine) {
-        return build(cats, mode, orderNo, place, payLine, place);
+        return build(cats, mode, orderNo, place, payLine, place, -1);
+    }
+
+    public static String build(List<MenuData.Cat> cats, int mode, String orderNo, String place, String payLine, String shipTo) {
+        return build(cats, mode, orderNo, place, payLine, shipTo, -1);
     }
 
     /**
-     * @param shipTo จุดส่ง — ต่อท้ายชื่อรายการค่าส่ง เช่น "ค่าส่ง Tara 20 บาท"
+     * @param shipTo  จุดส่ง — ต่อท้ายบรรทัดค่าส่ง เช่น "ค่าส่ง Tara 20 บาท"
+     * @param shipFee ค่าส่งที่เลือก: -1 = ไม่ระบุ, 0 = ส่งฟรี, >0 = จำนวนบาท
      */
-    public static String build(List<MenuData.Cat> cats, int mode, String orderNo, String place, String payLine, String shipTo) {
+    public static String build(List<MenuData.Cat> cats, int mode, String orderNo, String place,
+                               String payLine, String shipTo, int shipFee) {
         StringBuilder sb = new StringBuilder();
         String dest = (shipTo != null && !shipTo.trim().isEmpty()) ? shipTo.trim()
                 : (place != null ? place.trim() : "");
@@ -48,6 +54,17 @@ public class MsgBuilder {
             }
         }
 
+        if (shipFee == 0) {
+            sb.append("ส่งฟรี");
+            if (!dest.isEmpty()) sb.append(" ").append(dest);
+            sb.append("\n");
+        } else if (shipFee > 0) {
+            sb.append("ค่าส่ง");
+            if (!dest.isEmpty()) sb.append(" ").append(dest);
+            sb.append(" ").append(shipFee).append(" บาท\n");
+            total += shipFee;
+        }
+
         sb.append("\nยอดรวมทั้งหมด ").append(total).append(" บาท\n");
 
         if (payLine != null && !payLine.trim().isEmpty()) {
@@ -63,6 +80,11 @@ public class MsgBuilder {
             for (MenuData.Item it : c.items)
                 if (it.qty > 0) total += it.price * it.qty;
         return total;
+    }
+
+    /** ยอดรวม + ค่าส่งที่เลือก */
+    public static int total(List<MenuData.Cat> cats, int shipFee) {
+        return total(cats) + Math.max(0, shipFee);
     }
 
     public static void clear(List<MenuData.Cat> cats) {

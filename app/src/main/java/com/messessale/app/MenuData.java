@@ -7,9 +7,9 @@ import java.util.List;
 public class MenuData {
 
     public static class Item {
-        public final String name;
-        public final int price;
-        public final boolean custom; // ราคากำหนดเองตอนขาย
+        public String name;
+        public int price;
+        public boolean custom; // ราคากำหนดเองตอนขาย
         public int qty = 0;
 
         Item(String name, int price, boolean custom) {
@@ -20,10 +20,14 @@ public class MenuData {
     }
 
     public static class Cat {
-        public final String name;
+        public String name;
         public final List<Item> items = new ArrayList<>();
         Cat(String name) { this.name = name; }
     }
+
+    /** สร้างหมวด/รายการใหม่ (ใช้ตอนโหลดเมนูที่ผู้ใช้แก้ไว้) */
+    public static Cat newCat(String name) { return new Cat(name); }
+    public static Item newItem(String name, int price, boolean custom) { return new Item(name, price, custom); }
 
     public static List<Cat> build() {
         List<Cat> cats = new ArrayList<>();
@@ -68,11 +72,8 @@ public class MenuData {
         addon.items.add(new Item("น้ำแข็ง", 0, true));
         cats.add(addon);
 
-        Cat ship = new Cat("ค่าส่ง");
-        ship.items.add(new Item("ค่าส่ง", 20, true));
-        ship.items.add(new Item("ค่าส่ง tara", 20, false));
-        ship.items.add(new Item("เดอะพ้อยค่าส่ง", 40, false));
-        cats.add(ship);
+        // ค่าส่ง: เลือกจากปุ่ม ส่งฟรี / 10 / 20 / 30 / 40 (จัดการใน BubbleService)
+        cats.add(new Cat("ค่าส่ง"));
 
         return cats;
     }
