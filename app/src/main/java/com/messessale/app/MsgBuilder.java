@@ -5,13 +5,23 @@ import java.util.List;
 /** สร้างข้อความสำหรับ Copy ไปตอบลูกค้า / แจ้งพนักงาน */
 public class MsgBuilder {
 
-    public static final int MODE_CUSTOMER = 0;
-    public static final int MODE_STAFF    = 1;
+    public static final int MODE_CUSTOMER = 0; // ตอบลูกค้า
+    public static final int MODE_STAFF    = 1; // แจ้งพนักงาน
 
+    /**
+     * @param cats     รายการเมนูทั้งหมด (อ่าน qty)
+     * @param mode     MODE_CUSTOMER / MODE_STAFF
+     * @param orderNo  เลขออร์เดอร์ (โหมดพนักงาน) เช่น "3"
+     * @param place    จุดส่ง เช่น "Tara"
+     * @param payLine  ข้อความท้าย เช่น "ชำระเงินคนละครึ่งหรือโอนธรรมดาครับ"
+     */
     public static String build(List<MenuData.Cat> cats, int mode, String orderNo, String place, String payLine) {
         return build(cats, mode, orderNo, place, payLine, place);
     }
 
+    /**
+     * @param shipTo จุดส่ง — ต่อท้ายชื่อรายการค่าส่ง เช่น "ค่าส่ง Tara 20 บาท"
+     */
     public static String build(List<MenuData.Cat> cats, int mode, String orderNo, String place, String payLine, String shipTo) {
         StringBuilder sb = new StringBuilder();
         String dest = (shipTo != null && !shipTo.trim().isEmpty()) ? shipTo.trim()
@@ -60,6 +70,7 @@ public class MsgBuilder {
             for (MenuData.Item it : c.items) it.qty = 0;
     }
 
+    /** ข้อความโปรโมทเมนู (แบบที่ร้านโพสต์) */
     public static String promo() {
         return "🇹🇭รับไทยช่วยไทย🇹🇭\n" +
                "กุ้งเป็นๆเผาร้านบังฟาน\n" +
