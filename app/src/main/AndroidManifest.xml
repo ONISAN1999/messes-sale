@@ -28,6 +28,11 @@
             android:exported="false"
             android:windowSoftInputMode="adjustResize"/>
 
+        <activity
+            android:name=".MenuEditorActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"/>
+
         <service
             android:name=".BubbleService"
             android:exported="false"
