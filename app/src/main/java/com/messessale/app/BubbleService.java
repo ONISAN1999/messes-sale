@@ -18,6 +18,7 @@ import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -51,10 +52,11 @@ public class BubbleService extends Service {
     private String filter = "ทั้งหมด";
     private String place = "";
 
-    private LinearLayout bodyBox, staffRow, staffPay, placeChipRow;
+    private LinearLayout bodyBox, staffRow, staffPay, placeChipRow, previewBox;
     private ScrollView bodyScroll;
-    private TextView totalText, segCustomer, segStaff;
-    private EditText orderNoInput, placeInput;
+    private TextView totalText, segCustomer, segStaff, previewText;
+    private EditText orderNoInput, placeInput, searchInput;
+    private String search = "";
     private List<TextView> filterChips = new ArrayList<>();
     private int shipFee = -1; // -1 = ยังไม่เลือก, 0 = ส่งฟรี
     private static final int[] SHIP_FEES = {0, 10, 20, 30, 40};
@@ -180,7 +182,12 @@ public class BubbleService extends Service {
         totalText = text(this, "รวม 0 บาท", 14, true, OK_GREEN);
         totalText.setPadding(0, 0, dp(this, 8), 0);
         head.addView(totalText);
+        TextView eyeBtn = chip(this, "👁", false);
+        Fx.onTap(eyeBtn, this::togglePreview);
+        head.addView(eyeBtn);
         TextView opacityBtn = chip(this, "◐", false);
+        LinearLayout.LayoutParams olp = lp(WRAP, WRAP); olp.leftMargin = dp(this, 5);
+        opacityBtn.setLayoutParams(olp);
         Fx.onTap(opacityBtn, this::showOpacityDialog);
         head.addView(opacityBtn);
         TextView close = chip(this, "✕", false);
@@ -246,6 +253,30 @@ public class BubbleService extends Service {
         LinearLayout.LayoutParams fLp = lp(MATCH, WRAP); fLp.topMargin = dp(this, 12);
         panelView.addView(fScroll, fLp);
 
+        // ---- ค้นหาเมนู ----
+        LinearLayout sRow = row(this);
+        searchInput = input(this, "🔍 ค้นหาชื่อเมนู");
+        searchInput.setText(search);
+        searchInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s,int a,int b,int c) {}
+            @Override public void onTextChanged(CharSequence s,int a,int b,int c) {
+                search = s.toString(); rebuildBody();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+        sRow.addView(searchInput, lpw(1));
+        TextView sClear = text(this, "✕", 14, true, WHITE);
+        sClear.setGravity(Gravity.CENTER);
+        sClear.setBackground(glass(this, GLASS, 11, STROKE));
+        sClear.setPadding(dp(this,13), dp(this,11), dp(this,13), dp(this,11));
+        LinearLayout.LayoutParams scp = lp(WRAP, WRAP); scp.leftMargin = dp(this,6);
+        sClear.setLayoutParams(scp);
+        Fx.onTap(sClear, () -> { search = ""; searchInput.setText(""); rebuildBody(); });
+        sRow.addView(sClear);
+        LinearLayout.LayoutParams srLp = lp(MATCH, WRAP); srLp.topMargin = dp(this, 10);
+        panelView.addView(sRow, srLp);
+        watchKeyboard(searchInput);
+
         // ---- body (masonry) ----
         ScrollView sv = new ScrollView(this);
         bodyScroll = sv;
@@ -258,6 +289,25 @@ public class BubbleService extends Service {
         // เวลาแป้นพิมพ์ขึ้น ให้ย่อพื้นที่รายการ ปุ่มคัดลอกจะไม่โดนบัง
         watchKeyboard(orderNoInput);
         watchKeyboard(placeStaff);
+
+        // ---- พรีวิวข้อความ ----
+        previewBox = col(this);
+        previewBox.setBackground(glass(this, 0x33000000, 13, STROKE));
+        previewBox.setPadding(dp(this,12), dp(this,10), dp(this,12), dp(this,10));
+        previewBox.setVisibility(View.GONE);
+        LinearLayout pHead = row(this);
+        pHead.addView(text(this, "พรีวิวข้อความ", 11, false, WHITE_DIM), lpw(1));
+        TextView pClose = text(this, "ซ่อน", 11, true, 0xFFFFB3C6);
+        Fx.onTap(pClose, this::togglePreview);
+        pHead.addView(pClose);
+        previewBox.addView(pHead, lp(MATCH, WRAP));
+        ScrollView pSv = new ScrollView(this);
+        previewText = text(this, "", 11.5f, false, WHITE);
+        previewText.setPadding(0, dp(this,6), 0, 0);
+        pSv.addView(previewText);
+        previewBox.addView(pSv, lp(MATCH, dp(this, 130)));
+        LinearLayout.LayoutParams pvLp = lp(MATCH, WRAP); pvLp.topMargin = dp(this, 10);
+        panelView.addView(previewBox, pvLp);
 
         // ---- actions ----
         LinearLayout acts = row(this);
@@ -281,9 +331,38 @@ public class BubbleService extends Service {
         panelParams.gravity = Gravity.BOTTOM;
         panelParams.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
 
+        // กดปุ่มย้อนกลับของมือถือ = ย่อกลับเป็น Bubble
+        panelView.setFocusableInTouchMode(true);
+        panelView.setOnKeyListener((v, code, ev) -> {
+            if (code == KeyEvent.KEYCODE_BACK && ev.getAction() == KeyEvent.ACTION_UP) {
+                closePanel();
+                return true;
+            }
+            return false;
+        });
+
         refreshSeg(); rebuildBody(); refreshTotal();
         wm.addView(panelView, panelParams);
+        panelView.requestFocus();
         panelOpen = true;
+    }
+
+    /** เปิด/ปิดกล่องพรีวิวข้อความ */
+    private void togglePreview() {
+        if (previewBox == null) return;
+        boolean show = previewBox.getVisibility() != View.VISIBLE;
+        previewBox.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (show) { setBodyHeight(BODY_SHORT); refreshPreview(); }
+        else setBodyHeight(BODY_TALL);
+    }
+
+    private void refreshPreview() {
+        if (previewText == null || previewBox == null) return;
+        if (previewBox.getVisibility() != View.VISIBLE) return;
+        String msg = MsgBuilder.build(cats, mode,
+                orderNoInput.getText().toString(), placeInput.getText().toString(),
+                payLine(), place, shipFee);
+        previewText.setText(msg.isEmpty() ? "— ยังไม่ได้เลือกเมนู —" : msg);
     }
 
     private static final int BODY_TALL = 300;
@@ -340,6 +419,7 @@ public class BubbleService extends Service {
 
     private void closePanel() {
         if (panelView != null) { try { wm.removeView(panelView); } catch (Exception ignored) {} panelView = null; }
+        previewBox = null; previewText = null; bodyScroll = null;
         panelOpen = false;
     }
 
@@ -391,13 +471,19 @@ public class BubbleService extends Service {
                 bodyBox.addView(shipBlock(cat), lp(MATCH, WRAP));
             } else {
                 final List<MenuData.Item> items = cat.items;
-                final int n = items.size();
+                final List<Integer> idxs = new ArrayList<>();
+                String q = search.trim().toLowerCase();
+                for (int i = 0; i < items.size(); i++)
+                    if (q.isEmpty() || items.get(i).name.toLowerCase().contains(q)) idxs.add(i);
+                final int n = idxs.size();
                 bodyBox.addView(Masonry.grid(this, n + 1, new Masonry.CardBuilder() {
                     @Override public View build(int i) {
-                        return (i < n) ? menuCard(items.get(i), catIdx, i) : addMenuTile(catIdx);
+                        if (i >= n) return addMenuTile(catIdx);
+                        int real = idxs.get(i);
+                        return menuCard(items.get(real), catIdx, real);
                     }
                     @Override public int weight(int i) {
-                        return (i >= n) ? 58 : 62 + Math.min(items.get(i).name.length(), 40);
+                        return (i >= n) ? 58 : 62 + Math.min(items.get(idxs.get(i)).name.length(), 40);
                     }
                 }), lp(MATCH, WRAP));
             }
@@ -484,6 +570,32 @@ public class BubbleService extends Service {
         startActivity(i);
     }
 
+    /** เติมรายการแนะนำใต้ช่อง "ส่งที่ไหน" — ไม่ rebuild ทั้งแผง คีย์บอร์ดจึงไม่หลุด */
+    private void fillSuggest(LinearLayout box, EditText field, String typed) {
+        box.removeAllViews();
+        String q = typed == null ? "" : typed.trim().toLowerCase();
+        if (q.isEmpty()) { box.setVisibility(View.GONE); return; }
+
+        int shown = 0;
+        for (String p : Store.loadPlaces(this)) {
+            String lp2 = p.toLowerCase();
+            if (!lp2.contains(q) || lp2.equals(q)) continue;
+            final String pick = p;
+            TextView row = text(this, "📍  " + p, 12.5f, false, WHITE);
+            row.setPadding(dp(this,12), dp(this,10), dp(this,12), dp(this,10));
+            Fx.onTap(row, () -> {
+                place = pick;
+                field.setText(pick);
+                field.setSelection(pick.length());
+                box.setVisibility(View.GONE);
+                refreshTotal();
+            });
+            box.addView(row, lp(MATCH, WRAP));
+            if (++shown >= 5) break;
+        }
+        box.setVisibility(shown > 0 ? View.VISIBLE : View.GONE);
+    }
+
     /* ---- delivery block ---- */
     private View shipBlock(MenuData.Cat cat) {
         LinearLayout box = col(this);
@@ -511,16 +623,43 @@ public class BubbleService extends Service {
         fp.topMargin = dp(this,7); fp.bottomMargin = dp(this,11);
         box.addView(fsv, fp);
 
-        // ช่องส่งที่ไหน
-        EditText placeField = input(this, "ส่งที่ไหน เช่น Tara");
+        // ช่องส่งที่ไหน + ปุ่ม ✕ ล้าง
+        LinearLayout pRow = row(this);
+        final EditText placeField = input(this, "ส่งที่ไหน เช่น Tara");
         placeField.setText(place);
         watchKeyboard(placeField);
+        pRow.addView(placeField, lpw(1));
+
+        TextView pClear = text(this, "✕", 14, true, WHITE);
+        pClear.setGravity(Gravity.CENTER);
+        pClear.setBackground(glass(this, 0x33000000, 11, 0x669FE1CB));
+        pClear.setPadding(dp(this,13), dp(this,11), dp(this,13), dp(this,11));
+        LinearLayout.LayoutParams pcp = lp(WRAP, WRAP); pcp.leftMargin = dp(this,6);
+        pClear.setLayoutParams(pcp);
+        pRow.addView(pClear);
+        box.addView(pRow, lp(MATCH, WRAP));
+
+        // ดรอปดาวน์แนะนำที่อยู่ใกล้เคียงกับที่พิมพ์
+        final LinearLayout suggest = col(this);
+        suggest.setBackground(glass(this, 0x4D000000, 11, 0x669FE1CB));
+        suggest.setVisibility(View.GONE);
+        LinearLayout.LayoutParams sgp = lp(MATCH, WRAP); sgp.topMargin = dp(this, 5);
+        box.addView(suggest, sgp);
+
         placeField.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s,int a,int b,int c) {}
-            @Override public void onTextChanged(CharSequence s,int a,int b,int c) { place = s.toString(); }
+            @Override public void onTextChanged(CharSequence s,int a,int b,int c) {
+                place = s.toString();
+                fillSuggest(suggest, placeField, place);
+            }
             @Override public void afterTextChanged(Editable s) {}
         });
-        box.addView(placeField, lp(MATCH, WRAP));
+        Fx.onTap(pClear, () -> {
+            place = "";
+            placeField.setText("");
+            suggest.setVisibility(View.GONE);
+            refreshTotal();
+        });
 
         // ชิปหอที่ใช้บ่อย
         HorizontalScrollView psv = new HorizontalScrollView(this);
@@ -743,6 +882,7 @@ public class BubbleService extends Service {
 
     private void refreshTotal() {
         totalText.setText("รวม " + MsgBuilder.total(cats, shipFee) + " บาท");
+        refreshPreview();
     }
 
     /* ================= helpers ================= */
