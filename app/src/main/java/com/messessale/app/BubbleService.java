@@ -55,8 +55,9 @@ public class BubbleService extends Service {
     private LinearLayout bodyBox, staffRow, staffPay, placeChipRow, previewBox;
     private ScrollView bodyScroll;
     private TextView totalText, segCustomer, segStaff, previewText;
-    private EditText orderNoInput, placeInput, searchInput;
+    private EditText orderNoInput, placeInput, searchInput, shipPlaceField;
     private String search = "";
+    private boolean syncingPlace = false;
     private List<TextView> filterChips = new ArrayList<>();
     private int shipFee = -1; // -1 = ยังไม่เลือก, 0 = ส่งฟรี
     private static final int[] SHIP_FEES = {0, 10, 20, 30, 40};
@@ -218,8 +219,16 @@ public class BubbleService extends Service {
         staffRow = row(this);
         orderNoInput = input(this, "order ที่");
         orderNoInput.setInputType(InputType.TYPE_CLASS_NUMBER);
-        EditText placeStaff = input(this, "จุดส่ง");
+        final EditText placeStaff = input(this, "จุดส่ง");
         placeInput = placeStaff;
+        placeStaff.setText(place);
+        placeStaff.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s,int a,int b,int c) {}
+            @Override public void onTextChanged(CharSequence s,int a,int b,int c) {
+                setPlace(s.toString(), placeStaff);
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
         LinearLayout.LayoutParams o1 = lpw(1); o1.rightMargin = dp(this, 7);
         staffRow.addView(orderNoInput, o1);
         staffRow.addView(placeStaff, lpw(2));
@@ -419,13 +428,14 @@ public class BubbleService extends Service {
 
     private void closePanel() {
         if (panelView != null) { try { wm.removeView(panelView); } catch (Exception ignored) {} panelView = null; }
-        previewBox = null; previewText = null; bodyScroll = null;
+        previewBox = null; previewText = null; bodyScroll = null; shipPlaceField = null;
         panelOpen = false;
     }
 
     /* ================= body ================= */
     private void rebuildBody() {
         bodyBox.removeAllViews();
+        shipPlaceField = null; // จะถูกตั้งใหม่ถ้าบล็อกค่าส่งถูกสร้าง
 
         boolean showPhrase = filter.equals("ทั้งหมด") || filter.equals("คำพูด");
         if (showPhrase) {
@@ -570,6 +580,27 @@ public class BubbleService extends Service {
         startActivity(i);
     }
 
+    /** ตั้งค่าจุดส่ง แล้วซิงให้ทั้ง 2 ช่อง (จุดส่ง ↔ ส่งที่ไหน) ตรงกันเสมอ */
+    private void setPlace(String p, EditText from) {
+        if (syncingPlace) return;
+        syncingPlace = true;
+        place = p == null ? "" : p;
+        try {
+            if (placeInput != null && placeInput != from
+                    && !placeInput.getText().toString().equals(place)) {
+                placeInput.setText(place);
+                placeInput.setSelection(place.length());
+            }
+            if (shipPlaceField != null && shipPlaceField != from
+                    && !shipPlaceField.getText().toString().equals(place)) {
+                shipPlaceField.setText(place);
+                shipPlaceField.setSelection(place.length());
+            }
+        } catch (Exception ignored) {}
+        syncingPlace = false;
+        refreshTotal();
+    }
+
     /** เติมรายการแนะนำใต้ช่อง "ส่งที่ไหน" — ไม่ rebuild ทั้งแผง คีย์บอร์ดจึงไม่หลุด */
     private void fillSuggest(LinearLayout box, EditText field, String typed) {
         box.removeAllViews();
@@ -584,11 +615,10 @@ public class BubbleService extends Service {
             TextView row = text(this, "📍  " + p, 12.5f, false, WHITE);
             row.setPadding(dp(this,12), dp(this,10), dp(this,12), dp(this,10));
             Fx.onTap(row, () -> {
-                place = pick;
                 field.setText(pick);
                 field.setSelection(pick.length());
+                setPlace(pick, field);
                 box.setVisibility(View.GONE);
-                refreshTotal();
             });
             box.addView(row, lp(MATCH, WRAP));
             if (++shown >= 5) break;
@@ -626,6 +656,7 @@ public class BubbleService extends Service {
         // ช่องส่งที่ไหน + ปุ่ม ✕ ล้าง
         LinearLayout pRow = row(this);
         final EditText placeField = input(this, "ส่งที่ไหน เช่น Tara");
+        shipPlaceField = placeField;
         placeField.setText(place);
         watchKeyboard(placeField);
         pRow.addView(placeField, lpw(1));
@@ -649,16 +680,15 @@ public class BubbleService extends Service {
         placeField.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s,int a,int b,int c) {}
             @Override public void onTextChanged(CharSequence s,int a,int b,int c) {
-                place = s.toString();
+                setPlace(s.toString(), placeField);
                 fillSuggest(suggest, placeField, place);
             }
             @Override public void afterTextChanged(Editable s) {}
         });
         Fx.onTap(pClear, () -> {
-            place = "";
             placeField.setText("");
+            setPlace("", placeField);
             suggest.setVisibility(View.GONE);
-            refreshTotal();
         });
 
         // ชิปหอที่ใช้บ่อย
@@ -672,7 +702,7 @@ public class BubbleService extends Service {
             c.setPadding(dp(this,11), dp(this,5), dp(this,11), dp(this,5));
             LinearLayout.LayoutParams cp = lp(WRAP, WRAP); cp.rightMargin = dp(this,5);
             c.setLayoutParams(cp);
-            Fx.onTap(c, () -> { place = p; placeField.setText(p); rebuildBody(); });
+            Fx.onTap(c, () -> { placeField.setText(p); setPlace(p, placeField); rebuildBody(); });
             Fx.onHold(c, () -> { Store.forgetPlace(this, p); rebuildBody();
                 Toast.makeText(this, "ลบ " + p + " แล้ว", Toast.LENGTH_SHORT).show(); });
             placeChipRow.addView(c);
@@ -682,7 +712,7 @@ public class BubbleService extends Service {
         Fx.onTap(save, () -> {
             String p = placeField.getText().toString().trim();
             if (p.isEmpty()) { Toast.makeText(this, "พิมพ์ชื่อจุดส่งก่อน", Toast.LENGTH_SHORT).show(); return; }
-            Store.rememberPlace(this, p); place = p; rebuildBody();
+            Store.rememberPlace(this, p); setPlace(p, null); rebuildBody();
             Toast.makeText(this, "จำ " + p + " แล้ว", Toast.LENGTH_SHORT).show();
         });
         placeChipRow.addView(save);
