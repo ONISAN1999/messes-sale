@@ -20,6 +20,8 @@ import static com.messessale.app.UI.*;
 public class MainActivity extends Activity {
 
     private static final int REQ_QR = 101;
+    private static final int REQ_BACKUP = 102;
+    private static final int REQ_RESTORE = 103;
     private EditText bank, hours, map, payCustomer, payStaff;
 
     @Override protected void onCreate(Bundle b) {
@@ -96,8 +98,92 @@ public class MainActivity extends Activity {
         svLp.topMargin = dp(this, 10);
         root.addView(save, svLp);
 
+        // ---- สำรอง / กู้คืนข้อมูล ----
+        TextView bkHead = text(this, "สำรองข้อมูล", 16, true, WHITE);
+        bkHead.setPadding(0, dp(this, 26), 0, dp(this, 4));
+        root.addView(bkHead);
+
+        TextView bkNote = text(this,
+                "เก็บชื่อหอที่จำไว้ การ์ดคำพูด เมนูที่แก้ และการตั้งค่าทั้งหมด — ควรสำรองไว้ก่อนถอนแอป",
+                12, false, WHITE_DIM);
+        bkNote.setPadding(0, 0, 0, dp(this, 10));
+        root.addView(bkNote);
+
+        TextView bkBtn = button(this, "⬆   สำรองข้อมูลเป็นไฟล์", glass(this, GLASS, 14, STROKE), 15);
+        bkBtn.setOnClickListener(v -> {
+            Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("application/json");
+            i.putExtra(Intent.EXTRA_TITLE, "messes-backup.json");
+            startActivityForResult(i, REQ_BACKUP);
+        });
+        root.addView(bkBtn, lp(MATCH, WRAP));
+
+        TextView rsBtn = button(this, "⬇   กู้คืนจากไฟล์สำรอง", glass(this, GLASS, 14, STROKE), 15);
+        rsBtn.setOnClickListener(v -> {
+            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("*/*");
+            startActivityForResult(i, REQ_RESTORE);
+        });
+        LinearLayout.LayoutParams rsLp = lp(MATCH, WRAP);
+        rsLp.topMargin = dp(this, 10);
+        root.addView(rsBtn, rsLp);
+
         sv.addView(root);
         setContentView(sv);
+    }
+
+    /* ---------- สำรอง / กู้คืน ---------- */
+
+    private void backupTo(Uri uri) {
+        try {
+            org.json.JSONObject o = new org.json.JSONObject();
+            for (java.util.Map.Entry<String, ?> e : prefs().getAll().entrySet()) {
+                Object v = e.getValue();
+                if (v instanceof Integer) o.put(e.getKey(), "i:" + v);
+                else if (v instanceof Boolean) o.put(e.getKey(), "b:" + v);
+                else o.put(e.getKey(), "s:" + v);
+            }
+            java.io.OutputStream out = getContentResolver().openOutputStream(uri, "wt");
+            out.write(o.toString(2).getBytes("UTF-8"));
+            out.close();
+            Toast.makeText(this, "สำรองข้อมูลเรียบร้อย", Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "สำรองไม่สำเร็จ: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void restoreFrom(Uri uri) {
+        try {
+            java.io.InputStream in = getContentResolver().openInputStream(uri);
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+            in.close();
+
+            org.json.JSONObject o = new org.json.JSONObject(new String(bos.toByteArray(), "UTF-8"));
+            SharedPreferences.Editor ed = prefs().edit();
+            java.util.Iterator<String> keys = o.keys();
+            while (keys.hasNext()) {
+                String k = keys.next();
+                String raw = o.optString(k);
+                if (raw.startsWith("i:")) ed.putInt(k, Integer.parseInt(raw.substring(2)));
+                else if (raw.startsWith("b:")) ed.putBoolean(k, Boolean.parseBoolean(raw.substring(2)));
+                else if (raw.startsWith("s:")) ed.putString(k, raw.substring(2));
+                else ed.putString(k, raw);
+            }
+            ed.apply();
+
+            Intent i = new Intent(this, BubbleService.class);
+            i.putExtra("reload", true);
+            try { startForegroundService(i); } catch (Exception ignored) {}
+            Toast.makeText(this, "กู้คืนข้อมูลแล้ว — เปิดแอปใหม่อีกครั้ง", Toast.LENGTH_LONG).show();
+            recreate();
+        } catch (Exception e) {
+            Toast.makeText(this, "กู้คืนไม่สำเร็จ: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 
     private EditText addField(LinearLayout parent, String label, String value) {
@@ -112,6 +198,9 @@ public class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (res != RESULT_OK || data == null || data.getData() == null) return;
+        if (req == REQ_BACKUP) { backupTo(data.getData()); return; }
+        if (req == REQ_RESTORE) { restoreFrom(data.getData()); return; }
         if (req == REQ_QR && res == RESULT_OK && data != null && data.getData() != null) {
             Uri uri = data.getData();
             try {
