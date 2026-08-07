@@ -10,12 +10,29 @@ android {
         applicationId "com.messessale.app"
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "1.1"
+    }
+
+    // ลายเซ็นคงที่ — ทำให้ APK ใหม่ติดตั้งทับเวอร์ชันเดิมได้เลย ไม่ต้องถอนก่อน
+    signingConfigs {
+        fixed {
+            storeFile file('messes.keystore')
+            storePassword 'messes2026'
+            keyAlias 'messes'
+            keyPassword 'messes2026'
+        }
     }
 
     buildTypes {
-        debug { minifyEnabled false }
+        debug {
+            minifyEnabled false
+            signingConfig signingConfigs.fixed
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.fixed
+        }
     }
 
     compileOptions {
