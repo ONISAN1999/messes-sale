@@ -661,6 +661,21 @@ public class BubbleService extends Service {
         watchKeyboard(placeField);
         pRow.addView(placeField, lpw(1));
 
+        // 💾 ปุ่มจำที่อยู่ — อยู่ติดปุ่ม ✕ มองเห็นเสมอ (เดิมชิป "＋ จำไว้" ถูกดันหลุดขอบเวลามีหอเยอะ)
+        TextView pSave = text(this, "💾 จำ", 13, true, 0xFF04342C);
+        pSave.setGravity(Gravity.CENTER);
+        pSave.setBackground(glass(this, 0xFF9FE1CB, 11, 0));
+        pSave.setPadding(dp(this,13), dp(this,11), dp(this,13), dp(this,11));
+        LinearLayout.LayoutParams psp = lp(WRAP, WRAP); psp.leftMargin = dp(this,6);
+        pSave.setLayoutParams(psp);
+        Fx.onTap(pSave, () -> {
+            String p = shipPlaceField.getText().toString().trim();
+            if (p.isEmpty()) { Toast.makeText(this, "พิมพ์ชื่อจุดส่งก่อน", Toast.LENGTH_SHORT).show(); return; }
+            Store.rememberPlace(this, p); setPlace(p, null); rebuildBody();
+            Toast.makeText(this, "จำ " + p + " แล้ว", Toast.LENGTH_SHORT).show();
+        });
+        pRow.addView(pSave);
+
         TextView pClear = text(this, "✕", 14, true, WHITE);
         pClear.setGravity(Gravity.CENTER);
         pClear.setBackground(glass(this, 0x33000000, 11, 0x669FE1CB));
@@ -707,15 +722,6 @@ public class BubbleService extends Service {
                 Toast.makeText(this, "ลบ " + p + " แล้ว", Toast.LENGTH_SHORT).show(); });
             placeChipRow.addView(c);
         }
-        TextView save = chip(this, "＋ จำไว้", false);
-        save.setPadding(dp(this,11), dp(this,5), dp(this,11), dp(this,5));
-        Fx.onTap(save, () -> {
-            String p = placeField.getText().toString().trim();
-            if (p.isEmpty()) { Toast.makeText(this, "พิมพ์ชื่อจุดส่งก่อน", Toast.LENGTH_SHORT).show(); return; }
-            Store.rememberPlace(this, p); setPlace(p, null); rebuildBody();
-            Toast.makeText(this, "จำ " + p + " แล้ว", Toast.LENGTH_SHORT).show();
-        });
-        placeChipRow.addView(save);
         psv.addView(placeChipRow);
         LinearLayout.LayoutParams pl = lp(MATCH, WRAP); pl.topMargin = dp(this, 10);
         box.addView(psv, pl);
