@@ -22,7 +22,7 @@ public class MainActivity extends Activity {
     private static final int REQ_QR = 101;
     private static final int REQ_BACKUP = 102;
     private static final int REQ_RESTORE = 103;
-    private EditText bank, hours, map, payCustomer, payStaff;
+    private EditText bank, hours, map, payCustomer, payStaff, posUrl, posShop;
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -97,6 +97,31 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams svLp = lp(MATCH, WRAP);
         svLp.topMargin = dp(this, 10);
         root.addView(save, svLp);
+
+        // ---- เชื่อมกับเครื่อง POS ----
+        TextView posHead = text(this, "ส่งออเดอร์เข้าเครื่อง POS", 16, true, WHITE);
+        posHead.setPadding(0, dp(this, 26), 0, dp(this, 4));
+        root.addView(posHead);
+
+        TextView posNote = text(this,
+                "ใส่ลิงก์ Realtime Database ของ Firebase ให้ตรงกับที่ตั้งในแอป \"POS ออเดอร์\" "
+                        + "แล้วปุ่ม 🧾 ส่งเข้า POS ในฟองลอยจะใช้งานได้",
+                12, false, WHITE_DIM);
+        posNote.setPadding(0, 0, 0, dp(this, 4));
+        root.addView(posNote);
+
+        posUrl  = addField(root, "ลิงก์ฐานข้อมูล", PosSender.dbUrl(this));
+        posUrl.setHint("https://xxxx-default-rtdb.asia-southeast1.firebasedatabase.app");
+        posShop = addField(root, "รหัสร้าน", PosSender.shop(this));
+
+        TextView posSave = button(this, "🔗   บันทึกการเชื่อม POS", glass(this, GLASS, 14, STROKE), 15);
+        LinearLayout.LayoutParams psLp = lp(MATCH, WRAP);
+        psLp.topMargin = dp(this, 14);
+        posSave.setOnClickListener(v -> {
+            PosSender.save(this, posUrl.getText().toString(), posShop.getText().toString());
+            Toast.makeText(this, "บันทึกแล้ว", Toast.LENGTH_SHORT).show();
+        });
+        root.addView(posSave, psLp);
 
         // ---- สำรอง / กู้คืนข้อมูล ----
         TextView bkHead = text(this, "สำรองข้อมูล", 16, true, WHITE);
