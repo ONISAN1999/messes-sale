@@ -54,8 +54,13 @@ public class Masonry {
 
     /** หัวข้อหมวดคั่นในกริด */
     public static View header(Context c, String title, int color) {
-        android.widget.TextView t = text(c, title, 11.5f, true, color);
-        t.setPadding(dp(c, 2), dp(c, 10), 0, dp(c, 9));
-        return t;
+        LinearLayout r = row(c);
+        r.setPadding(dp(c, 2), dp(c, 12), 0, dp(c, 9));
+        android.view.View d = dot(c, color, 7);
+        r.addView(d);
+        android.widget.TextView t = text(c, title, 12.5f, true, WHITE);
+        t.setPadding(dp(c, 7), 0, 0, 0);
+        r.addView(t);
+        return r;
     }
 }
