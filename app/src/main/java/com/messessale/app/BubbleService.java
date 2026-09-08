@@ -65,6 +65,8 @@ public class BubbleService extends Service {
     /* ---- สถานะออเดอร์บนเครื่อง POS (เรียลไทม์) ---- */
     private static final String F_POS = "สถานะ POS";
     private List<PosSender.OrderStatus> posOrders = new ArrayList<>();
+    private String posBanner = "";
+    private long posBannerAt = 0;
     private boolean posLoading = false;
     private final android.os.Handler posUi = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable posPoll = new Runnable() {
@@ -562,54 +564,116 @@ public class BubbleService extends Service {
             bodyBox.addView(warn);
             return;
         }
-        if (posOrders.isEmpty()) {
-            TextView em = text(this, posLoading ? "กำลังโหลด…" : "ยังไม่มีออเดอร์ที่ส่งเข้า POS", 13, false, WHITE_DIM);
+        // แถบแจ้งผลการส่งครั้งล่าสุด (แทน Toast ที่บางเครื่องไม่เด้ง)
+        if (!posBanner.isEmpty() && System.currentTimeMillis() - posBannerAt < 120000L) {
+            boolean good = posBanner.startsWith("✅");
+            TextView bn = text(this, posBanner, 12.5f, true, good ? 0xFF9FF0C4 : 0xFFFFB4B4);
+            bn.setBackground(glass(this, good ? 0x2622C55E : 0x26EF4444, 12,
+                    good ? 0x5522C55E : 0x55EF4444));
+            bn.setPadding(dp(this,12), dp(this,10), dp(this,12), dp(this,10));
+            LinearLayout.LayoutParams bl = lp(MATCH, WRAP);
+            bl.topMargin = dp(this,8); bl.bottomMargin = dp(this,6);
+            bodyBox.addView(bn, bl);
+        }
+
+        List<PosSender.SendLog> logs = PosSender.logList(this);
+
+        if (logs.isEmpty() && posOrders.isEmpty()) {
+            TextView em = text(this, posLoading ? "กำลังโหลด…" : "ยังไม่เคยส่งออเดอร์เข้า POS", 13, false, WHITE_DIM);
             em.setPadding(dp(this,2), dp(this,12), 0, 0);
             bodyBox.addView(em);
             return;
         }
 
-        int waiting = 0;
+        int waiting = 0, fail = 0;
         for (PosSender.OrderStatus s : posOrders) if (s.status.equals("ใหม่")) waiting++;
-        TextView sum = text(this, "ทั้งหมด " + posOrders.size() + " ออเดอร์  •  รอ POS กดรับ " + waiting,
-                11.5f, false, WHITE_DIM);
-        sum.setPadding(dp(this,2), 0, 0, dp(this,8));
+        for (PosSender.SendLog l : logs) if (!l.ok) fail++;
+        TextView sum = text(this, "ส่งไปแล้ว " + logs.size() + " ครั้ง  •  รอ POS กดรับ " + waiting
+                + (fail > 0 ? "  •  ส่งไม่สำเร็จ " + fail : ""), 11.5f, false, WHITE_DIM);
+        sum.setPadding(dp(this,2), dp(this,4), 0, dp(this,8));
         bodyBox.addView(sum);
 
-        for (PosSender.OrderStatus s : posOrders) {
-            LinearLayout card = row(this);
-            card.setBackground(glass(this, 0x1FFFFFFF, 13, 0x33FFFFFF));
-            card.setPadding(dp(this,12), dp(this,11), dp(this,12), dp(this,11));
+        java.util.HashSet<String> shown = new java.util.HashSet<>();
+        for (PosSender.SendLog l : logs) {
+            PosSender.OrderStatus cloud = null;
+            if (!l.id.isEmpty()) {
+                for (PosSender.OrderStatus s : posOrders)
+                    if (s.id.equals(l.id)) { cloud = s; break; }
+            }
+            if (cloud != null) shown.add(cloud.id);
 
-            TextView dot = text(this, "●", 16, true, s.color());
-            dot.setPadding(0, 0, dp(this,10), 0);
-            card.addView(dot);
+            int c = !l.ok ? 0xFFEF4444 : (cloud != null ? cloud.color() : 0xFF94A3B8);
+            String stateTxt;
+            if (!l.ok) stateTxt = "ส่งไม่สำเร็จ" + (l.err.isEmpty() ? "" : " — " + l.err);
+            else if (cloud != null) stateTxt = "ส่งสำเร็จ · " + cloud.label();
+            else stateTxt = "ส่งสำเร็จ · ไม่พบบนคลาวด์แล้ว (POS อาจล้างออกไป)";
 
-            LinearLayout info = col(this);
-            String head = (s.no.isEmpty() ? "ออเดอร์" : "ออเดอร์ที่ " + s.no)
-                    + (s.place.isEmpty() ? "" : "  •  " + s.place);
-            info.addView(text(this, head, 13.5f, true, WHITE));
-
-            TextView st = text(this, s.label(), 12, true, s.color());
-            st.setPadding(0, dp(this,3), 0, 0);
-            info.addView(st);
-
-            TextView meta = text(this, "ส่งไป " + s.minAgo() + " นาทีที่แล้ว"
-                    + (s.total > 0 ? "  •  " + s.total + " บาท" : ""), 11, false, WHITE_DIM);
-            meta.setPadding(0, dp(this,2), 0, 0);
-            info.addView(meta);
-
-            card.addView(info, lpw(1));
-
-            LinearLayout.LayoutParams cl = lp(MATCH, WRAP);
-            cl.bottomMargin = dp(this, 8);
-            bodyBox.addView(card, cl);
+            bodyBox.addView(posCard(c, l.no, l.place, stateTxt,
+                    "ส่งเมื่อ " + l.clock() + " น. · " + l.ago()
+                            + (l.total > 0 ? "  •  " + l.total + " บาท" : "")),
+                    posCardLp());
         }
 
-        TextView tip = text(this, "🟡 รอ POS กดรับ   🟠 กำลังทำ   🟢 เสร็จแล้ว  (อัปเดตเองทุก 6 วิ)",
+        boolean headed = false;
+        for (PosSender.OrderStatus s : posOrders) {
+            if (shown.contains(s.id)) continue;
+            if (!headed) {
+                TextView hh = text(this, "ออเดอร์อื่นบนคลาวด์", 11.5f, true, 0xFF8FA0BD);
+                hh.setPadding(dp(this,2), dp(this,8), 0, dp(this,6));
+                bodyBox.addView(hh);
+                headed = true;
+            }
+            bodyBox.addView(posCard(s.color(), s.no, s.place, s.label(),
+                    "เข้ามา " + s.minAgo() + " นาทีที่แล้ว"
+                            + (s.total > 0 ? "  •  " + s.total + " บาท" : "")),
+                    posCardLp());
+        }
+
+        LinearLayout foot = row(this);
+        TextView tip = text(this, "🟡 รอ POS กดรับ   🟠 กำลังทำ   🟢 เสร็จแล้ว  (อัปเดตทุก 6 วิ)",
                 10.5f, false, 0xFF8FA0BD);
-        tip.setPadding(dp(this,2), dp(this,4), 0, 0);
-        bodyBox.addView(tip);
+        foot.addView(tip, lpw(1));
+        if (!logs.isEmpty()) {
+            TextView clr = chip(this, "ล้างประวัติ", false);
+            Fx.onTap(clr, () -> { PosSender.logClear(this); posBanner = ""; rebuildBody(); });
+            foot.addView(clr);
+        }
+        LinearLayout.LayoutParams fl = lp(MATCH, WRAP);
+        fl.topMargin = dp(this,6);
+        bodyBox.addView(foot, fl);
+    }
+
+    private LinearLayout.LayoutParams posCardLp() {
+        LinearLayout.LayoutParams cl = lp(MATCH, WRAP);
+        cl.bottomMargin = dp(this, 8);
+        return cl;
+    }
+
+    /** การ์ด 1 ใบในหน้าสถานะ POS */
+    private View posCard(int color, String no, String place, String state, String meta) {
+        LinearLayout card = row(this);
+        card.setBackground(glass(this, 0x1FFFFFFF, 13, 0x33FFFFFF));
+        card.setPadding(dp(this,12), dp(this,11), dp(this,12), dp(this,11));
+
+        TextView dot = text(this, "●", 16, true, color);
+        dot.setPadding(0, 0, dp(this,10), 0);
+        card.addView(dot);
+
+        LinearLayout info = col(this);
+        String head = (no == null || no.isEmpty() ? "ออเดอร์" : "ออเดอร์ที่ " + no)
+                + (place == null || place.isEmpty() ? "" : "  •  " + place);
+        info.addView(text(this, head, 13.5f, true, WHITE));
+
+        TextView st2 = text(this, state, 12, true, color);
+        st2.setPadding(0, dp(this,3), 0, 0);
+        info.addView(st2);
+
+        TextView mt = text(this, meta, 11, false, WHITE_DIM);
+        mt.setPadding(0, dp(this,2), 0, 0);
+        info.addView(mt);
+
+        card.addView(info, lpw(1));
+        return card;
     }
 
     /* ---- menu card ---- */
@@ -1067,27 +1131,33 @@ public class BubbleService extends Service {
 
         Toast.makeText(this, "กำลังส่งเข้าเครื่อง POS…", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
-            String result;
+            String result, key = "", err = "";
             boolean ok = false;
             try {
-                PosSender.send(BubbleService.this, no, dest, msg, total, pay);
-                result = "ส่งเข้าเครื่อง POS แล้ว";
+                key = PosSender.send(BubbleService.this, no, dest, msg, total, pay);
+                result = "✅ ส่งเข้าเครื่อง POS แล้ว";
                 ok = true;
             } catch (Exception e) {
-                result = "ส่งไม่สำเร็จ: " + e.getMessage();
+                err = e.getMessage() == null ? e.toString() : e.getMessage();
+                result = "❌ ส่งไม่สำเร็จ: " + err;
             }
+            PosSender.logAdd(BubbleService.this, key, no, dest, total, ok, err);
             final String r = result;
             final boolean sent = ok;
             posUi.post(() -> {
-                Toast.makeText(BubbleService.this, r, Toast.LENGTH_LONG).show();
-                if (sent && panelOpen) {
-                    // เด้งไปหน้าสถานะให้ดูสดๆ ว่า POS กดรับหรือยัง
+                posBanner = r;
+                posBannerAt = System.currentTimeMillis();
+                try { Toast.makeText(BubbleService.this, r, Toast.LENGTH_LONG).show(); } catch (Exception ignored) {}
+                if (panelOpen) {
+                    // เด้งไปหน้าสถานะเสมอ — สำเร็จก็ดูว่า POS กดรับยัง ไม่สำเร็จก็เห็นสาเหตุ
                     filter = F_POS;
                     refreshFilters();
                     rebuildBody();
-                    fetchPosOrders();
-                    posUi.removeCallbacks(posPoll);
-                    posUi.postDelayed(posPoll, 6000);
+                    if (sent) {
+                        fetchPosOrders();
+                        posUi.removeCallbacks(posPoll);
+                        posUi.postDelayed(posPoll, 6000);
+                    }
                 }
             });
         }).start();

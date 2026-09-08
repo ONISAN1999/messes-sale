@@ -36,6 +36,82 @@ public class PosSender {
                 .apply();
     }
 
+    /* ============ ประวัติการส่ง (เก็บในเครื่อง) ============ */
+
+    public static final String K_LOG = "pos_log";
+    private static final int LOG_MAX = 40;
+
+    /** 1 บรรทัดของประวัติการส่งออเดอร์เข้า POS */
+    public static class SendLog {
+        public String id = "", no = "", place = "", err = "";
+        public int total = 0;
+        public long at = 0;
+        public boolean ok = false;
+
+        public int minAgo() {
+            if (at <= 0) return 0;
+            return (int) ((System.currentTimeMillis() - at) / 60000L);
+        }
+
+        public String clock() {
+            if (at <= 0) return "";
+            return new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+                    .format(new java.util.Date(at));
+        }
+
+        public String ago() {
+            int m = minAgo();
+            if (m < 1) return "เมื่อครู่นี้";
+            if (m < 60) return m + " นาทีที่แล้ว";
+            return (m / 60) + " ชม. " + (m % 60) + " นาทีที่แล้ว";
+        }
+    }
+
+    /** บันทึกผลการส่ง 1 ครั้ง */
+    public static void logAdd(Context c, String id, String no, String place,
+                              int total, boolean ok, String err) {
+        try {
+            JSONArray arr = new JSONArray(Store.prefs(c).getString(K_LOG, "[]"));
+            JSONObject o = new JSONObject();
+            o.put("id", id == null ? "" : id);
+            o.put("no", no == null ? "" : no.trim());
+            o.put("place", place == null ? "" : place.trim());
+            o.put("total", total);
+            o.put("ok", ok);
+            o.put("err", err == null ? "" : err);
+            o.put("at", System.currentTimeMillis());
+            arr.put(o);
+            while (arr.length() > LOG_MAX) arr.remove(0);
+            Store.prefs(c).edit().putString(K_LOG, arr.toString()).apply();
+        } catch (Exception ignored) {}
+    }
+
+    /** อ่านประวัติ — ใหม่สุดขึ้นก่อน */
+    public static java.util.List<SendLog> logList(Context c) {
+        java.util.List<SendLog> out = new java.util.ArrayList<>();
+        try {
+            JSONArray arr = new JSONArray(Store.prefs(c).getString(K_LOG, "[]"));
+            for (int i = arr.length() - 1; i >= 0; i--) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                SendLog s = new SendLog();
+                s.id = o.optString("id", "");
+                s.no = o.optString("no", "");
+                s.place = o.optString("place", "");
+                s.total = o.optInt("total", 0);
+                s.ok = o.optBoolean("ok", false);
+                s.err = o.optString("err", "");
+                s.at = o.optLong("at", 0);
+                out.add(s);
+            }
+        } catch (Exception ignored) {}
+        return out;
+    }
+
+    public static void logClear(Context c) {
+        Store.prefs(c).edit().putString(K_LOG, "[]").apply();
+    }
+
     /** สถานะออเดอร์ที่อ่านกลับมาจากเครื่อง POS */
     public static class OrderStatus {
         public String id = "", no = "", place = "", status = "ใหม่";
@@ -107,8 +183,8 @@ public class PosSender {
     }
 
     /** ส่งออเดอร์ 1 ใบ — เรียกจาก background thread เท่านั้น */
-    public static void send(Context c, String orderNo, String place, String text,
-                            int total, String payInfo) throws Exception {
+    public static String send(Context c, String orderNo, String place, String text,
+                              int total, String payInfo) throws Exception {
         String u = dbUrl(c);
         while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
         String endpoint = u + "/shops/" + shop(c) + "/orders.json";
@@ -144,7 +220,18 @@ public class PosSender {
         os.close();
 
         int code = con.getResponseCode();
+        java.io.InputStream rin = (code >= 200 && code < 300) ? con.getInputStream() : con.getErrorStream();
+        String resp = "";
+        if (rin != null) {
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[2048];
+            int n;
+            while ((n = rin.read(buf)) > 0) bos.write(buf, 0, n);
+            rin.close();
+            resp = new String(bos.toByteArray(), "UTF-8");
+        }
         con.disconnect();
-        if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
+        if (code < 200 || code >= 300) throw new Exception("HTTP " + code + " " + resp);
+        try { return new JSONObject(resp).optString("name", ""); } catch (Exception e) { return ""; }
     }
 }
