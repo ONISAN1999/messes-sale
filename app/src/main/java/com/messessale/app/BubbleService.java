@@ -198,6 +198,11 @@ public class BubbleService extends Service {
         totalText = text(this, "รวม 0 บาท", 14, true, OK_GREEN);
         totalText.setPadding(0, 0, dp(this, 8), 0);
         head.addView(totalText);
+        TextView posTab = chip(this, "🧾", filter.equals(F_POS));
+        LinearLayout.LayoutParams ptp = lp(WRAP, WRAP); ptp.rightMargin = dp(this, 5);
+        posTab.setLayoutParams(ptp);
+        Fx.onTap(posTab, this::openPosStatus);
+        head.addView(posTab);
         TextView eyeBtn = chip(this, "👁", false);
         Fx.onTap(eyeBtn, this::togglePreview);
         head.addView(eyeBtn);
@@ -380,6 +385,16 @@ public class BubbleService extends Service {
         wm.addView(panelView, panelParams);
         panelView.requestFocus();
         panelOpen = true;
+    }
+
+    /** เปิดหน้าสถานะออเดอร์ที่ส่งเข้า POS */
+    private void openPosStatus() {
+        filter = F_POS;
+        refreshFilters();
+        rebuildBody();
+        fetchPosOrders();
+        posUi.removeCallbacks(posPoll);
+        posUi.postDelayed(posPoll, 6000);
     }
 
     /** เปิด/ปิดกล่องพรีวิวข้อความ */
