@@ -194,7 +194,7 @@ public class BubbleService extends Service {
 
         // ---- header ----
         LinearLayout head = row(this);
-        head.addView(text(this, "🦐 Messes Sale", 15, true, WHITE), lpw(1));
+        head.addView(text(this, "🦐 Messes Sale " + ver(this), 15, true, WHITE), lpw(1));
         totalText = text(this, "รวม 0 บาท", 14, true, OK_GREEN);
         totalText.setPadding(0, 0, dp(this, 8), 0);
         head.addView(totalText);
