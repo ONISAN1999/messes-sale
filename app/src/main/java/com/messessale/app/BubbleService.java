@@ -59,7 +59,10 @@ public class BubbleService extends Service {
     private String search = "";
     private boolean syncingPlace = false;
     private MenuData.Item noteEditFor = null, priceEditFor = null;   // การ์ดที่กำลังเปิดช่องโน้ต/ราคา
-    private LinearLayout editorBar;                                   // แถบใส่ราคา/โน้ต อยู่เหนือรายการ (ไม่โดนคีย์บอร์ดบัง)
+    private LinearLayout editorBar;
+    private String editingId = null;        // กำลังแก้ไขออเดอร์ที่ส่งไปแล้ว (id บนคลาวด์)
+    private String editingLabel = "";
+    private TextView posBtn;                                   // แถบใส่ราคา/โน้ต อยู่เหนือรายการ (ไม่โดนคีย์บอร์ดบัง)
     private List<TextView> filterChips = new ArrayList<>();
     private int shipFee = -1; // -1 = ยังไม่เลือก, 0 = ส่งฟรี
     private static final int[] SHIP_FEES = {0, 10, 20, 30, 40};
@@ -380,8 +383,9 @@ public class BubbleService extends Service {
                     payLine(), place, shipFee);
             copy(msg, "คัดลอกข้อความแล้ว");
         });
-        TextView posBtn = button(this, "🧾  ส่งเข้า POS", glass(this, 0x2634D399, 16, MINT), 14);
-        posBtn.setTextColor(MINT);
+        posBtn = button(this, editingId != null ? "✏️  อัปเดตออเดอร์" : "🧾  ส่งเข้า POS",
+                glass(this, editingId != null ? 0x26A78BFA : 0x2634D399, 16, editingId != null ? LAVENDER : MINT), 14);
+        posBtn.setTextColor(editingId != null ? LAVENDER : MINT);
         Fx.onCopyTap(posBtn, this::sendToPos);
         TextView clearBtn = button(this, "ล้าง", glass(this, SURFACE_2, 16, LINE), 14);
         clearBtn.setTextColor(WHITE_DIM);
@@ -497,7 +501,7 @@ public class BubbleService extends Service {
 
     private void closePanel() {
         if (panelView != null) { try { wm.removeView(panelView); } catch (Exception ignored) {} panelView = null; }
-        previewBox = null; previewText = null; bodyScroll = null; shipPlaceField = null; editorBar = null;
+        previewBox = null; previewText = null; bodyScroll = null; shipPlaceField = null; editorBar = null; posBtn = null;
         noteEditFor = null; priceEditFor = null;
         posUi.removeCallbacks(posPoll);
         panelOpen = false;
@@ -508,6 +512,21 @@ public class BubbleService extends Service {
         bodyBox.removeAllViews();
         shipPlaceField = null; // จะถูกตั้งใหม่ถ้าบล็อกค่าส่งถูกสร้าง
         refreshEditorBar();
+
+        if (editingId != null && !filter.equals(F_POS)) {
+            LinearLayout eb = row(this);
+            eb.setBackground(surfaceTint(this, 14, 0x88A78BFA));
+            eb.setPadding(dp(this,12), dp(this,9), dp(this,10), dp(this,9));
+            LinearLayout ec = col(this);
+            ec.addView(text(this, "✏️ กำลังแก้ไข " + editingLabel, 12.5f, true, LAVENDER));
+            ec.addView(text(this, "ปรับรายการแล้วกด \"อัปเดตออเดอร์\" — POS จะเด้งเตือนให้กดรับทราบใหม่", 10.5f, false, WHITE_DIM));
+            eb.addView(ec, lpw(1));
+            TextView cancel = chip(this, "ยกเลิก", false);
+            Fx.onTap(cancel, () -> { editingId = null; editingLabel = ""; MsgBuilder.clear(cats); shipFee = -1; refreshPosBtn(); rebuildBody(); refreshTotal(); });
+            eb.addView(cancel);
+            LinearLayout.LayoutParams ebl = lp(MATCH, WRAP); ebl.bottomMargin = dp(this, 8);
+            bodyBox.addView(eb, ebl);
+        }
 
         if (filter.equals(F_POS)) { buildPosStatus(); return; }
 
@@ -653,10 +672,19 @@ public class BubbleService extends Service {
             else if (cloud != null) stateTxt = "ส่งสำเร็จ · " + cloud.label();
             else stateTxt = "ส่งสำเร็จ · ไม่พบบนคลาวด์แล้ว (POS อาจล้างออกไป)";
 
-            bodyBox.addView(posCard(c, l.no, l.place, stateTxt,
+            View pc = posCard(c, l.no, l.place, stateTxt,
                     "ส่งเมื่อ " + l.clock() + " น. · " + l.ago()
-                            + (l.total > 0 ? "  •  " + l.total + " บาท" : "")),
-                    posCardLp());
+                            + (l.total > 0 ? "  •  " + l.total + " บาท" : "")
+                            + (l.edits > 0 ? "  •  แก้ไข " + l.edits + " ครั้ง" : ""));
+            if (l.ok && !l.id.isEmpty() && !l.lines.isEmpty()) {
+                final PosSender.SendLog fl = l;
+                TextView edit = chip(this, "✏️", false);
+                edit.setPadding(dp(this,10), dp(this,8), dp(this,10), dp(this,8));
+                LinearLayout.LayoutParams elp = lp(WRAP, WRAP); elp.leftMargin = dp(this, 6);
+                Fx.onTap(edit, () -> loadForEdit(fl));
+                ((LinearLayout) pc).addView(edit, elp);
+            }
+            bodyBox.addView(pc, posCardLp());
         }
 
         boolean headed = false;
@@ -1353,6 +1381,62 @@ public class BubbleService extends Service {
         try { Toast.makeText(this, title, Toast.LENGTH_LONG).show(); } catch (Exception ignored) {}
     }
 
+    private void refreshPosBtn() {
+        if (posBtn == null) return;
+        boolean e = editingId != null;
+        posBtn.setText(e ? "✏️  อัปเดตออเดอร์" : "🧾  ส่งเข้า POS");
+        posBtn.setBackground(glass(this, e ? 0x26A78BFA : 0x2634D399, 16, e ? LAVENDER : MINT));
+        posBtn.setTextColor(e ? LAVENDER : MINT);
+    }
+
+    /** โหลดออเดอร์ที่ส่งไปแล้วกลับเข้าตะกร้าเพื่อแก้ไข */
+    private void loadForEdit(PosSender.SendLog l) {
+        MsgBuilder.clear(cats);
+        shipFee = -1; payChannel = ""; payStatus = "";
+        java.util.regex.Pattern item = java.util.regex.Pattern.compile("^(.*?)(?: x(\\d+))? (\\d+) บาท(?: \\((.*)\\))?$");
+        java.util.regex.Pattern fee = java.util.regex.Pattern.compile("(\\d+) บาท$");
+        int missed = 0;
+        for (String raw : l.lines.split("\\n")) {
+            String t = raw.trim();
+            if (t.isEmpty() || t.startsWith("order") || t.startsWith("ยอดรวม")) continue;
+            if (t.startsWith("ช่องทางชำระ")) { int i = t.indexOf(":"); if (i > 0) payChannel = t.substring(i + 1).trim(); continue; }
+            if (t.startsWith("สถานะ")) { int i = t.indexOf(":"); if (i > 0) payStatus = t.substring(i + 1).trim(); continue; }
+            if (t.startsWith("ส่งฟรี")) { shipFee = 0; continue; }
+            if (t.startsWith("ค่าส่ง")) {
+                java.util.regex.Matcher fm = fee.matcher(t);
+                if (fm.find()) { try { shipFee = Integer.parseInt(fm.group(1)); } catch (Exception ignored) {} }
+                continue;
+            }
+            java.util.regex.Matcher m = item.matcher(t);
+            if (!m.find()) { missed++; continue; }
+            String name = m.group(1).trim();
+            int qty = m.group(2) == null ? 1 : Integer.parseInt(m.group(2));
+            int lineTotal = Integer.parseInt(m.group(3));
+            String note = m.group(4) == null ? "" : m.group(4).trim();
+            MenuData.Item found = null;
+            for (MenuData.Cat c : cats) {
+                if (c.name.equals("ค่าส่ง")) continue;
+                for (MenuData.Item it : c.items) if (it.name.trim().equals(name)) { found = it; break; }
+                if (found != null) break;
+            }
+            if (found == null) { missed++; continue; }
+            found.qty = qty;
+            found.note = note;
+            if (found.custom && qty > 0) found.price = lineTotal / qty;
+        }
+        editingId = l.id;
+        editingLabel = (l.no.isEmpty() ? "ออเดอร์" : "ออเดอร์ #" + l.no) + (l.place.isEmpty() ? "" : " • " + l.place);
+        mode = MsgBuilder.MODE_STAFF;
+        filter = "ทั้งหมด";
+        if (orderNoInput != null) orderNoInput.setText(l.no);
+        setPlace(l.place, null);
+        if (placeInput != null) placeInput.setText(l.place);
+        refreshSeg(); refreshFilters(); buildPayRows(); refreshPosBtn();
+        rebuildBody(); refreshTotal();
+        posUi.removeCallbacks(posPoll);
+        Toast.makeText(this, missed > 0 ? "โหลดออเดอร์แล้ว (มี " + missed + " รายการที่หาเมนูไม่เจอ)" : "โหลดออเดอร์มาแก้ไขแล้ว", Toast.LENGTH_LONG).show();
+    }
+
     private void sendToPos() {
         if (!PosSender.ready(this)) {
             Toast.makeText(this, "ยังไม่ได้ตั้งค่าลิงก์ POS — เปิดแอป Messes Sale แล้วใส่ลิงก์ฐานข้อมูลก่อน",
@@ -1370,24 +1454,41 @@ public class BubbleService extends Service {
         final int total = MsgBuilder.total(cats, shipFee);
         final String pay = payLine();
 
-        Toast.makeText(this, "กำลังส่งเข้าเครื่อง POS…", Toast.LENGTH_SHORT).show();
+        final String editId = editingId;
+        boolean reopenTmp = false;
+        if (editId != null) for (PosSender.OrderStatus o : posOrders) if (o.id.equals(editId) && o.status.equals("เสร็จ")) reopenTmp = true;
+        final boolean reopen = reopenTmp;
+
+        Toast.makeText(this, editId != null ? "กำลังอัปเดตออเดอร์…" : "กำลังส่งเข้าเครื่อง POS…", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             String result, key = "", err = "";
             boolean ok = false;
             try {
-                key = PosSender.send(BubbleService.this, no, dest, msg, total, pay);
-                result = "✅ ส่งเข้าเครื่อง POS แล้ว";
+                if (editId != null) {
+                    PosSender.update(BubbleService.this, editId, no, dest, msg, total, pay, reopen);
+                    key = editId;
+                    result = "✅ อัปเดตออเดอร์แล้ว — รอ POS กดรับทราบ";
+                } else {
+                    key = PosSender.send(BubbleService.this, no, dest, msg, total, pay);
+                    result = "✅ ส่งเข้าเครื่อง POS แล้ว";
+                }
                 ok = true;
             } catch (Exception e) {
                 err = e.getMessage() == null ? e.toString() : e.getMessage();
-                result = "❌ ส่งไม่สำเร็จ: " + err;
+                result = (editId != null ? "❌ อัปเดตไม่สำเร็จ: " : "❌ ส่งไม่สำเร็จ: ") + err;
             }
-            PosSender.logAdd(BubbleService.this, key, no, dest, total, ok, err);
+            if (editId != null && ok) PosSender.logEdit(BubbleService.this, editId, no, dest, total, msg, pay);
+            else if (editId == null) PosSender.logAdd(BubbleService.this, key, no, dest, total, ok, err, msg, pay);
             final String r = result;
             final boolean sent = ok;
             posUi.post(() -> {
                 posBanner = r;
                 posBannerAt = System.currentTimeMillis();
+                if (sent) {
+                    editingId = null; editingLabel = "";
+                    MsgBuilder.clear(cats); shipFee = -1;
+                    refreshPosBtn(); refreshTotal();
+                }
                 try { Toast.makeText(BubbleService.this, r, Toast.LENGTH_LONG).show(); } catch (Exception ignored) {}
                 if (panelOpen) {
                     // เด้งไปหน้าสถานะเสมอ — สำเร็จก็ดูว่า POS กดรับยัง ไม่สำเร็จก็เห็นสาเหตุ

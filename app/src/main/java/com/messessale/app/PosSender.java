@@ -55,6 +55,9 @@ public class PosSender {
         public int total = 0;
         public long at = 0;
         public boolean ok = false;
+        public int edits = 0;          // แก้ไขไปแล้วกี่ครั้ง
+        public String lines = "";      // ข้อความออเดอร์ (ไว้โหลดกลับมาแก้)
+        public String pay = "";
 
         public int minAgo() {
             if (at <= 0) return 0;
@@ -78,6 +81,11 @@ public class PosSender {
     /** บันทึกผลการส่ง 1 ครั้ง */
     public static void logAdd(Context c, String id, String no, String place,
                               int total, boolean ok, String err) {
+        logAdd(c, id, no, place, total, ok, err, "", "");
+    }
+
+    public static void logAdd(Context c, String id, String no, String place,
+                              int total, boolean ok, String err, String text, String pay) {
         try {
             JSONArray arr = new JSONArray(Store.prefs(c).getString(K_LOG, "[]"));
             JSONObject o = new JSONObject();
@@ -88,6 +96,9 @@ public class PosSender {
             o.put("ok", ok);
             o.put("err", err == null ? "" : err);
             o.put("at", System.currentTimeMillis());
+            o.put("edits", 0);
+            o.put("lines", text == null ? "" : text);
+            o.put("pay", pay == null ? "" : pay);
             arr.put(o);
             while (arr.length() > LOG_MAX) arr.remove(0);
             Store.prefs(c).edit().putString(K_LOG, arr.toString()).apply();
@@ -110,10 +121,40 @@ public class PosSender {
                 s.ok = o.optBoolean("ok", false);
                 s.err = o.optString("err", "");
                 s.at = o.optLong("at", 0);
+                s.edits = o.optInt("edits", 0);
+                s.lines = o.optString("lines", "");
+                s.pay = o.optString("pay", "");
                 out.add(s);
             }
         } catch (Exception ignored) {}
         return out;
+    }
+
+    /** อัปเดตรายการเดิมหลังแก้ไขออเดอร์ (id เดิม) */
+    public static void logEdit(Context c, String id, String no, String place, int total, String text, String pay) {
+        try {
+            JSONArray arr = new JSONArray(Store.prefs(c).getString(K_LOG, "[]"));
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null || !id.equals(o.optString("id", ""))) continue;
+                o.put("no", no == null ? "" : no.trim());
+                o.put("place", place == null ? "" : place.trim());
+                o.put("total", total);
+                o.put("ok", true); o.put("err", "");
+                o.put("at", System.currentTimeMillis());
+                o.put("edits", o.optInt("edits", 0) + 1);
+                o.put("lines", text == null ? "" : text);
+                o.put("pay", pay == null ? "" : pay);
+            }
+            Store.prefs(c).edit().putString(K_LOG, arr.toString()).apply();
+        } catch (Exception ignored) {}
+        // แก้ไขแล้ว → ให้แจ้งเตือน "เสร็จ" ได้อีกครั้ง
+        try {
+            JSONArray arr = new JSONArray(Store.prefs(c).getString(K_DONE, "[]"));
+            JSONArray keep = new JSONArray();
+            for (int i = 0; i < arr.length(); i++) if (!id.equals(arr.optString(i))) keep.put(arr.optString(i));
+            Store.prefs(c).edit().putString(K_DONE, keep.toString()).apply();
+        } catch (Exception ignored) {}
     }
 
     public static void logClear(Context c) {
@@ -146,6 +187,10 @@ public class PosSender {
         public String id = "", no = "", place = "", status = "ใหม่";
         public int total = 0;
         public long createdAt = 0;
+        public long editedAt = 0, ackEditAt = 0;
+
+        /** แก้ไขไปแล้ว แต่ POS ยังไม่กดรับทราบ */
+        public boolean waitingAck() { return editedAt > 0 && ackEditAt < editedAt; }
 
         /** นาทีที่ผ่านไปตั้งแต่ส่ง */
         public int minAgo() {
@@ -154,12 +199,14 @@ public class PosSender {
         }
 
         public int color() {
+            if (waitingAck()) return 0xFFA78BFA;                 // ม่วง = แก้ไขแล้ว รอ POS รับทราบ
             if (status.equals("เสร็จ")) return 0xFF22C55E;      // เขียว = POS ทำเสร็จแล้ว
             if (status.equals("กำลังทำ")) return 0xFFF97316;    // ส้ม = POS กดรับแล้ว
             return 0xFFFACC15;                                   // เหลือง = ยังไม่มีใครกดรับ
         }
 
         public String label() {
+            if (waitingAck()) return "แก้ไขแล้ว · รอ POS รับทราบ";
             if (status.equals("เสร็จ")) return "เสร็จแล้ว";
             if (status.equals("กำลังทำ")) return "POS รับแล้ว กำลังทำ";
             return "รอ POS กดรับ";
@@ -206,6 +253,8 @@ public class PosSender {
             s.status = o.optString("status", "ใหม่");
             s.total = o.optInt("total", 0);
             s.createdAt = o.optLong("createdAt", 0);
+            s.editedAt = o.optLong("editedAt", 0);
+            s.ackEditAt = o.optLong("ackEditAt", 0);
             out.add(s);
         }
         java.util.Collections.sort(out, (a, b) -> Long.compare(b.createdAt, a.createdAt)); // ใหม่สุดขึ้นก่อน
@@ -263,5 +312,47 @@ public class PosSender {
         con.disconnect();
         if (code < 200 || code >= 300) throw new Exception("HTTP " + code + " " + resp);
         try { return new JSONObject(resp).optString("name", ""); } catch (Exception e) { return ""; }
+    }
+
+    /** แก้ไขออเดอร์เดิม (PATCH id เดิม) — POS จะเด้งเตือนให้กดรับทราบใหม่ */
+    public static void update(Context c, String id, String orderNo, String place, String text,
+                              int total, String payInfo, boolean reopen) throws Exception {
+        String u = dbUrl(c);
+        while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
+        String endpoint = u + "/shops/" + shop(c) + "/orders/" + id + ".json";
+
+        JSONObject o = new JSONObject();
+        o.put("no", orderNo == null ? "" : orderNo.trim());
+        o.put("place", place == null ? "" : place.trim());
+        o.put("text", text == null ? "" : text);
+        o.put("total", total);
+        o.put("pay", payInfo == null ? "" : payInfo);
+        o.put("editedAt", new JSONObject().put(".sv", "timestamp"));
+        o.put("edited", true);
+        if (reopen) o.put("status", "ใหม่");     // เคยเสร็จแล้ว → กลับมาเป็นออเดอร์ใหม่
+        JSONArray lines = new JSONArray();
+        if (text != null) {
+            for (String s : text.split("\n")) {
+                String t = s.trim();
+                if (t.isEmpty()) continue;
+                if (t.startsWith("ยอดรวม") || t.startsWith("order")) continue;
+                lines.put(t);
+            }
+        }
+        o.put("lines", lines);
+
+        HttpURLConnection con = (HttpURLConnection) new URL(endpoint).openConnection();
+        con.setConnectTimeout(9000);
+        con.setReadTimeout(12000);
+        con.setRequestMethod("POST");
+        con.setRequestProperty("X-HTTP-Method-Override", "PATCH");
+        con.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        con.setDoOutput(true);
+        OutputStream os = con.getOutputStream();
+        os.write(o.toString().getBytes("UTF-8"));
+        os.close();
+        int code = con.getResponseCode();
+        con.disconnect();
+        if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
     }
 }
