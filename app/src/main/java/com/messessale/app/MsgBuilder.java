@@ -50,7 +50,9 @@ public class MsgBuilder {
                 sb.append(it.name);
                 if (isShip && !dest.isEmpty() && !it.name.contains(dest)) sb.append(" ").append(dest);
                 if (it.qty > 1) sb.append(" x").append(it.qty);
-                sb.append(" ").append(line).append(" บาท\n");
+                sb.append(" ").append(line).append(" บาท");
+                if (it.note != null && !it.note.trim().isEmpty()) sb.append(" (").append(it.note.trim()).append(")");
+                sb.append("\n");
             }
         }
 
@@ -89,7 +91,7 @@ public class MsgBuilder {
 
     public static void clear(List<MenuData.Cat> cats) {
         for (MenuData.Cat c : cats)
-            for (MenuData.Item it : c.items) it.qty = 0;
+            for (MenuData.Item it : c.items) { it.qty = 0; it.note = ""; if (it.custom) it.price = 0; }
     }
 
     /** ข้อความโปรโมทเมนู (แบบที่ร้านโพสต์) */

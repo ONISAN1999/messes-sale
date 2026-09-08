@@ -58,6 +58,7 @@ public class BubbleService extends Service {
     private EditText orderNoInput, placeInput, searchInput, shipPlaceField;
     private String search = "";
     private boolean syncingPlace = false;
+    private MenuData.Item noteEditFor = null, priceEditFor = null;   // การ์ดที่กำลังเปิดช่องโน้ต/ราคา
     private List<TextView> filterChips = new ArrayList<>();
     private int shipFee = -1; // -1 = ยังไม่เลือก, 0 = ส่งฟรี
     private static final int[] SHIP_FEES = {0, 10, 20, 30, 40};
@@ -702,6 +703,18 @@ public class BubbleService extends Service {
         LinearLayout top = row(this);
         top.addView(text(this, it.name, 12.5f, true, WHITE), lpw(1));
         if (on) {
+            // ปุ่มโน้ตต่อเมนู
+            TextView noteBtn = text(this, "📝", 12, false, WHITE);
+            noteBtn.setGravity(Gravity.CENTER);
+            noteBtn.setBackground(glass(this, it.note.isEmpty() ? 0x33000000 : 0xCCFFFFFF, 9, 0x59FFFFFF));
+            noteBtn.setPadding(dp(this,7), dp(this,2), dp(this,7), dp(this,2));
+            LinearLayout.LayoutParams nbp = lp(WRAP, WRAP); nbp.leftMargin = dp(this,6);
+            Fx.onTap(noteBtn, () -> {
+                noteEditFor = (noteEditFor == it) ? null : it;
+                priceEditFor = null;
+                rebuildBody();
+            });
+            top.addView(noteBtn, nbp);
             TextView badge = text(this, String.valueOf(it.qty), 12, true, 0xFF15181F);
             badge.setGravity(Gravity.CENTER);
             badge.setBackground(glass(this, WHITE, 20, 0));
@@ -711,9 +724,20 @@ public class BubbleService extends Service {
         }
         card.addView(top, lp(MATCH, WRAP));
 
+        // โน้ตที่ใส่ไว้
+        if (!it.note.isEmpty() && noteEditFor != it) {
+            TextView nt = text(this, "📝 " + it.note, 10.5f, false, 0xF2FFFFFF);
+            nt.setPadding(0, dp(this,3), 0, 0);
+            card.addView(nt);
+        }
+
         LinearLayout bottom = row(this);
-        bottom.addView(text(this, it.custom ? "กำหนดเอง" : (it.price + " บาท"), 11.5f,
-                true, 0xF2FFFFFF), lpw(1));
+        String priceTxt = it.custom
+                ? (it.price > 0 ? it.price + " บาท ✎" : "กำหนดเอง ✎")
+                : (it.price + " บาท");
+        TextView priceLbl = text(this, priceTxt, 11.5f, true, 0xF2FFFFFF);
+        if (it.custom) Fx.onTap(priceLbl, () -> { priceEditFor = it; noteEditFor = null; rebuildBody(); });
+        bottom.addView(priceLbl, lpw(1));
 
         if (on) {
             TextView minus = text(this, "−", 14, true, WHITE);
@@ -727,7 +751,7 @@ public class BubbleService extends Service {
             plus2.setBackground(glass(this, 0x33000000, 9, 0x59FFFFFF));
             plus2.setPadding(dp(this,11), dp(this,2), dp(this,11), dp(this,2));
             LinearLayout.LayoutParams p2 = lp(WRAP, WRAP); p2.leftMargin = dp(this,5);
-            Fx.onTap(plus2, () -> { it.qty++; rebuildBody(); refreshTotal(); });
+            Fx.onTap(plus2, () -> addOne(it));
             bottom.addView(plus2, p2);
         } else {
             TextView plus = text(this, "+", 14, true, WHITE);
@@ -740,9 +764,74 @@ public class BubbleService extends Service {
         LinearLayout.LayoutParams bp = lp(MATCH, WRAP); bp.topMargin = dp(this, 8);
         card.addView(bottom, bp);
 
-        Fx.onTap(card, () -> { it.qty++; rebuildBody(); refreshTotal(); });
+        // ---- ช่องใส่ราคา (เมนูกำหนดเอง) ----
+        if (it.custom && priceEditFor == it) {
+            LinearLayout er = row(this);
+            final EditText pe = input(this, "ใส่ราคา (บาท)");
+            pe.setInputType(InputType.TYPE_CLASS_NUMBER);
+            if (it.price > 0) pe.setText(String.valueOf(it.price));
+            pe.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence c,int a,int b,int d) {}
+                @Override public void onTextChanged(CharSequence c,int a,int b,int d) {
+                    try { it.price = Integer.parseInt(c.toString().trim()); } catch (Exception e) { it.price = 0; }
+                    if (it.qty == 0 && it.price > 0) it.qty = 1;
+                    refreshTotal();
+                }
+                @Override public void afterTextChanged(Editable e) {}
+            });
+            watchKeyboard(pe);
+            er.addView(pe, lpw(1));
+            TextView ok = text(this, "✓", 14, true, 0xFF15181F);
+            ok.setGravity(Gravity.CENTER);
+            ok.setBackground(glass(this, WHITE, 10, 0));
+            ok.setPadding(dp(this,12), dp(this,6), dp(this,12), dp(this,6));
+            LinearLayout.LayoutParams okp = lp(WRAP, WRAP); okp.leftMargin = dp(this,6);
+            Fx.onTap(ok, () -> { if (it.price > 0 && it.qty == 0) it.qty = 1; priceEditFor = null; rebuildBody(); refreshTotal(); });
+            er.addView(ok, okp);
+            LinearLayout.LayoutParams erp = lp(MATCH, WRAP); erp.topMargin = dp(this, 8);
+            card.addView(er, erp);
+            posUi.post(pe::requestFocus);
+        }
+
+        // ---- ช่องโน้ตต่อเมนู ----
+        if (noteEditFor == it) {
+            LinearLayout nr = row(this);
+            final EditText ne = input(this, "โน้ต เช่น ไม่ใส่ผัก / เผาสุกมาก");
+            ne.setText(it.note);
+            ne.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence c,int a,int b,int d) {}
+                @Override public void onTextChanged(CharSequence c,int a,int b,int d) { it.note = c.toString(); refreshPreview(); }
+                @Override public void afterTextChanged(Editable e) {}
+            });
+            watchKeyboard(ne);
+            nr.addView(ne, lpw(1));
+            TextView ok = text(this, "✓", 14, true, 0xFF15181F);
+            ok.setGravity(Gravity.CENTER);
+            ok.setBackground(glass(this, WHITE, 10, 0));
+            ok.setPadding(dp(this,12), dp(this,6), dp(this,12), dp(this,6));
+            LinearLayout.LayoutParams okp = lp(WRAP, WRAP); okp.leftMargin = dp(this,6);
+            Fx.onTap(ok, () -> { it.note = it.note.trim(); noteEditFor = null; rebuildBody(); });
+            nr.addView(ok, okp);
+            LinearLayout.LayoutParams nrp = lp(MATCH, WRAP); nrp.topMargin = dp(this, 8);
+            card.addView(nr, nrp);
+            posUi.post(ne::requestFocus);
+        }
+
+        Fx.onTap(card, () -> addOne(it));
         Fx.onHold(card, () -> openMenuEditor(catIdx, itemIdx));
         return card;
+    }
+
+    /** กด + / แตะการ์ด: เมนูกำหนดเองที่ยังไม่มีราคา → เปิดช่องใส่ราคาก่อน */
+    private void addOne(MenuData.Item it) {
+        if (it.custom && it.price <= 0) {
+            priceEditFor = it; noteEditFor = null;
+            rebuildBody();
+            return;
+        }
+        it.qty++;
+        rebuildBody();
+        refreshTotal();
     }
 
     /** ไทล์ ＋ เพิ่มเมนู ท้ายแต่ละหมวด */

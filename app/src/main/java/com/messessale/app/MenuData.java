@@ -11,6 +11,7 @@ public class MenuData {
         public int price;
         public boolean custom; // ราคากำหนดเองตอนขาย
         public int qty = 0;
+        public String note = "";   // โน้ตต่อเมนู เช่น "ไม่ใส่ผัก" (ไม่บันทึกถาวร)
 
         Item(String name, int price, boolean custom) {
             this.name = name;
