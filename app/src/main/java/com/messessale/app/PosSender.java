@@ -18,8 +18,12 @@ public class PosSender {
     public static final String K_URL = "pos_db_url";
     public static final String K_SHOP = "pos_shop";
 
+    /** ลิงก์ฐานข้อมูลของร้าน (ฝังมากับแอป — ไม่ต้องตั้งค่า) */
+    public static final String DEFAULT_URL = "https://gungpao-bangfan-default-rtdb.asia-southeast1.firebasedatabase.app";
+
     public static String dbUrl(Context c) {
-        return Store.prefs(c).getString(K_URL, "").trim();
+        String u = Store.prefs(c).getString(K_URL, "").trim();
+        return u.isEmpty() ? DEFAULT_URL : u;
     }
 
     public static String shop(Context c) {
