@@ -46,3 +46,13 @@ jobs:
           tag_name: build-${{ github.run_number }}
           name: Messes Sale build ${{ github.run_number }}
           files: MessesSale.apk
+
+      - name: Commit APK to dist/ (for direct git download)
+        run: |
+          mkdir -p dist
+          cp MessesSale.apk dist/MessesSale.apk
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add dist/MessesSale.apk
+          git commit -m "dist: MessesSale.apk build ${{ github.run_number }} [skip ci]" || exit 0
+          git push
