@@ -29,6 +29,10 @@ public class PosSender {
 
     public static boolean ready(Context c) { return !dbUrl(c).isEmpty(); }
 
+    /** ส่วนต่างเวลาเครื่องนี้กับเซิร์ฟเวอร์ — ให้ "นาทีที่แล้ว" ตรงกับเครื่อง POS */
+    public static long offset = 0;
+    public static long now() { return System.currentTimeMillis() + offset; }
+
     public static void save(Context c, String url, String shopCode) {
         Store.prefs(c).edit()
                 .putString(K_URL, url == null ? "" : url.trim())
@@ -121,7 +125,7 @@ public class PosSender {
         /** นาทีที่ผ่านไปตั้งแต่ส่ง */
         public int minAgo() {
             if (createdAt <= 0) return 0;
-            return (int) ((System.currentTimeMillis() - createdAt) / 60000L);
+            return (int) Math.max(0, (now() - createdAt) / 60000L);
         }
 
         public int color() {
@@ -149,6 +153,7 @@ public class PosSender {
         con.setReadTimeout(12000);
         con.setRequestMethod("GET");
         int code = con.getResponseCode();
+        try { long srv = con.getHeaderFieldDate("Date", 0); if (srv > 0) offset = srv - System.currentTimeMillis(); } catch (Exception ignored) {}
         java.io.InputStream in = (code >= 200 && code < 300) ? con.getInputStream() : con.getErrorStream();
         String body = "";
         if (in != null) {
@@ -196,7 +201,7 @@ public class PosSender {
         o.put("total", total);
         o.put("pay", payInfo == null ? "" : payInfo);
         o.put("status", "ใหม่");
-        o.put("createdAt", System.currentTimeMillis());
+        o.put("createdAt", new JSONObject().put(".sv", "timestamp"));   // ให้เซิร์ฟเวอร์ประทับเวลา กันนาฬิกามือถือ/POS ไม่ตรงกัน
 
         JSONArray lines = new JSONArray();
         if (text != null) {
