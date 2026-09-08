@@ -120,6 +120,27 @@ public class PosSender {
         Store.prefs(c).edit().putString(K_LOG, "[]").apply();
     }
 
+    /* ============ ออเดอร์ที่แจ้ง "เสร็จ" ไปแล้ว (กันเตือนซ้ำ) ============ */
+    public static final String K_DONE = "pos_done_seen";
+
+    public static java.util.Set<String> doneSeen(Context c) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        try {
+            JSONArray arr = new JSONArray(Store.prefs(c).getString(K_DONE, "[]"));
+            for (int i = 0; i < arr.length(); i++) out.add(arr.optString(i));
+        } catch (Exception ignored) {}
+        return out;
+    }
+
+    public static void markDoneSeen(Context c, String id) {
+        try {
+            JSONArray arr = new JSONArray(Store.prefs(c).getString(K_DONE, "[]"));
+            arr.put(id);
+            while (arr.length() > 80) arr.remove(0);
+            Store.prefs(c).edit().putString(K_DONE, arr.toString()).apply();
+        } catch (Exception ignored) {}
+    }
+
     /** สถานะออเดอร์ที่อ่านกลับมาจากเครื่อง POS */
     public static class OrderStatus {
         public String id = "", no = "", place = "", status = "ใหม่";

@@ -69,6 +69,16 @@ public class BubbleService extends Service {
     private List<PosSender.OrderStatus> posOrders = new ArrayList<>();
     private String posBanner = "";
     private long posBannerAt = 0;
+
+    /* ---- เฝ้าดูออเดอร์ที่ส่งไป: POS กดเสร็จ → เสียงแจ้งเตือนที่มือถือ ---- */
+    private static final String CH_DONE = "pos_done_ch";
+    private static final long BG_POLL_MS = 10000;
+    private final Runnable bgPoll = new Runnable() {
+        @Override public void run() {
+            checkDoneOrders();
+            posUi.postDelayed(this, BG_POLL_MS);
+        }
+    };
     private boolean posLoading = false;
     private final android.os.Handler posUi = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable posPoll = new Runnable() {
@@ -100,6 +110,7 @@ public class BubbleService extends Service {
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         startForegroundNotif();
         addBubble();
+        posUi.postDelayed(bgPoll, 4000);
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -1262,6 +1273,86 @@ public class BubbleService extends Service {
     }
 
     /** ส่งออเดอร์ปัจจุบันขึ้นคลาวด์ให้เครื่อง POS เด้งเป็นฟอง */
+    /** เช็คทุก 10 วิ ว่าออเดอร์ที่ส่งจากเครื่องนี้ถูก POS กดเสร็จหรือยัง */
+    private void checkDoneOrders() {
+        if (!PosSender.ready(this)) return;
+        final List<PosSender.SendLog> logs = PosSender.logList(this);
+        final java.util.Set<String> seen = PosSender.doneSeen(this);
+        boolean pending = false;
+        long cutoff = System.currentTimeMillis() - 12L * 3600000L;   // ดูเฉพาะที่ส่งภายใน 12 ชม.
+        for (PosSender.SendLog l : logs)
+            if (l.ok && !l.id.isEmpty() && l.at > cutoff && !seen.contains(l.id)) { pending = true; break; }
+        if (!pending) return;
+
+        new Thread(() -> {
+            List<PosSender.OrderStatus> got;
+            try { got = PosSender.fetchAll(BubbleService.this); } catch (Exception e) { return; }
+            final List<PosSender.OrderStatus> res = got;
+            posUi.post(() -> {
+                posOrders = res;
+                for (PosSender.SendLog l : logs) {
+                    if (!l.ok || l.id.isEmpty() || seen.contains(l.id)) continue;
+                    for (PosSender.OrderStatus o : res) {
+                        if (!o.id.equals(l.id)) continue;
+                        if (o.status.equals("เสร็จ")) {
+                            PosSender.markDoneSeen(BubbleService.this, l.id);
+                            notifyDone(l);
+                        }
+                    }
+                }
+                if (panelOpen && filter.equals(F_POS)) rebuildBody();
+            });
+        }).start();
+    }
+
+    /** POS กดเสร็จแล้ว → เสียง + สั่น + แจ้งเตือน + ฟองเด้ง */
+    private void notifyDone(PosSender.SendLog l) {
+        String title = "✅ ออเดอร์เสร็จแล้ว" + (l.no.isEmpty() ? "" : " #" + l.no);
+        String body = (l.place.isEmpty() ? "" : l.place + "  •  ") + (l.total > 0 ? l.total + " บาท" : "")
+                + "  •  ส่งเมื่อ " + l.clock() + " น.";
+
+        // เสียง (ริงโทนแจ้งเตือน + ปี๊บสั้น เผื่อเครื่องไม่มีริงโทน)
+        try {
+            android.net.Uri u = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION);
+            android.media.Ringtone r = android.media.RingtoneManager.getRingtone(getApplicationContext(), u);
+            if (r != null) r.play();
+        } catch (Exception ignored) {}
+        try {
+            android.media.ToneGenerator tg = new android.media.ToneGenerator(android.media.AudioManager.STREAM_NOTIFICATION, 90);
+            tg.startTone(android.media.ToneGenerator.TONE_PROP_ACK, 220);
+            posUi.postDelayed(tg::release, 800);
+        } catch (Exception ignored) {}
+        try {
+            android.os.Vibrator v = (android.os.Vibrator) getSystemService(VIBRATOR_SERVICE);
+            if (v != null && v.hasVibrator())
+                v.vibrate(android.os.VibrationEffect.createWaveform(new long[]{0, 120, 80, 200}, -1));
+        } catch (Exception ignored) {}
+
+        // แจ้งเตือนระบบ
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            NotificationChannel ch = new NotificationChannel(CH_DONE, "POS ทำออเดอร์เสร็จ", NotificationManager.IMPORTANCE_HIGH);
+            ch.setDescription("แจ้งเมื่อเครื่อง POS กดว่าออเดอร์เสร็จแล้ว");
+            nm.createNotificationChannel(ch);
+            PendingIntent pi = PendingIntent.getActivity(this, 0,
+                    new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
+            Notification n = new Notification.Builder(this, CH_DONE)
+                    .setContentTitle(title)
+                    .setContentText(body)
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentIntent(pi)
+                    .setAutoCancel(true)
+                    .build();
+            nm.notify((int) (System.currentTimeMillis() % 100000) + 10, n);
+        } catch (Exception ignored) {}
+
+        // ฟองเด้ง + แถบในแผง
+        if (bubbleView != null) Fx.bounce(bubbleView);
+        posBanner = title + "  " + body;
+        posBannerAt = System.currentTimeMillis();
+        try { Toast.makeText(this, title, Toast.LENGTH_LONG).show(); } catch (Exception ignored) {}
+    }
+
     private void sendToPos() {
         if (!PosSender.ready(this)) {
             Toast.makeText(this, "ยังไม่ได้ตั้งค่าลิงก์ POS — เปิดแอป Messes Sale แล้วใส่ลิงก์ฐานข้อมูลก่อน",
@@ -1321,6 +1412,7 @@ public class BubbleService extends Service {
 
     @Override public void onDestroy() {
         super.onDestroy();
+        posUi.removeCallbacks(bgPoll);
         closePanel();
         if (bubbleView != null) { try { wm.removeView(bubbleView); } catch (Exception ignored) {} }
     }
