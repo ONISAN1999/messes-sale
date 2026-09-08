@@ -10,8 +10,8 @@ android {
         applicationId "com.messessale.app"
         minSdk 26
         targetSdk 34
-        versionCode 9
-        versionName "1.8"
+        versionCode 10
+        versionName "1.9"
     }
 
     // ลายเซ็นคงที่ — ทำให้ APK ใหม่ติดตั้งทับเวอร์ชันเดิมได้เลย ไม่ต้องถอนก่อน
