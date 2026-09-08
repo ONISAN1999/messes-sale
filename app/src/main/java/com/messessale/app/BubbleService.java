@@ -59,6 +59,7 @@ public class BubbleService extends Service {
     private String search = "";
     private boolean syncingPlace = false;
     private MenuData.Item noteEditFor = null, priceEditFor = null;   // การ์ดที่กำลังเปิดช่องโน้ต/ราคา
+    private LinearLayout editorBar;                                   // แถบใส่ราคา/โน้ต อยู่เหนือรายการ (ไม่โดนคีย์บอร์ดบัง)
     private List<TextView> filterChips = new ArrayList<>();
     private int shipFee = -1; // -1 = ยังไม่เลือก, 0 = ส่งฟรี
     private static final int[] SHIP_FEES = {0, 10, 20, 30, 40};
@@ -314,6 +315,12 @@ public class BubbleService extends Service {
         panelView.addView(sRow, srLp);
         watchKeyboard(searchInput);
 
+        // ---- แถบใส่ราคา / โน้ต (โชว์เฉพาะตอนกำลังแก้) ----
+        editorBar = col(this);
+        editorBar.setVisibility(View.GONE);
+        LinearLayout.LayoutParams ebLp = lp(MATCH, WRAP); ebLp.topMargin = dp(this, 8);
+        panelView.addView(editorBar, ebLp);
+
         // ---- body (masonry) ----
         ScrollView sv = new ScrollView(this);
         bodyScroll = sv;
@@ -470,7 +477,8 @@ public class BubbleService extends Service {
 
     private void closePanel() {
         if (panelView != null) { try { wm.removeView(panelView); } catch (Exception ignored) {} panelView = null; }
-        previewBox = null; previewText = null; bodyScroll = null; shipPlaceField = null;
+        previewBox = null; previewText = null; bodyScroll = null; shipPlaceField = null; editorBar = null;
+        noteEditFor = null; priceEditFor = null;
         posUi.removeCallbacks(posPoll);
         panelOpen = false;
     }
@@ -479,6 +487,7 @@ public class BubbleService extends Service {
     private void rebuildBody() {
         bodyBox.removeAllViews();
         shipPlaceField = null; // จะถูกตั้งใหม่ถ้าบล็อกค่าส่งถูกสร้าง
+        refreshEditorBar();
 
         if (filter.equals(F_POS)) { buildPosStatus(); return; }
 
@@ -764,62 +773,83 @@ public class BubbleService extends Service {
         LinearLayout.LayoutParams bp = lp(MATCH, WRAP); bp.topMargin = dp(this, 8);
         card.addView(bottom, bp);
 
-        // ---- ช่องใส่ราคา (เมนูกำหนดเอง) ----
-        if (it.custom && priceEditFor == it) {
-            LinearLayout er = row(this);
-            final EditText pe = input(this, "ใส่ราคา (บาท)");
-            pe.setInputType(InputType.TYPE_CLASS_NUMBER);
-            if (it.price > 0) pe.setText(String.valueOf(it.price));
-            pe.addTextChangedListener(new TextWatcher() {
-                @Override public void beforeTextChanged(CharSequence c,int a,int b,int d) {}
-                @Override public void onTextChanged(CharSequence c,int a,int b,int d) {
-                    try { it.price = Integer.parseInt(c.toString().trim()); } catch (Exception e) { it.price = 0; }
-                    if (it.qty == 0 && it.price > 0) it.qty = 1;
-                    refreshTotal();
-                }
-                @Override public void afterTextChanged(Editable e) {}
-            });
-            watchKeyboard(pe);
-            er.addView(pe, lpw(1));
-            TextView ok = text(this, "✓", 14, true, 0xFF15181F);
-            ok.setGravity(Gravity.CENTER);
-            ok.setBackground(glass(this, WHITE, 10, 0));
-            ok.setPadding(dp(this,12), dp(this,6), dp(this,12), dp(this,6));
-            LinearLayout.LayoutParams okp = lp(WRAP, WRAP); okp.leftMargin = dp(this,6);
-            Fx.onTap(ok, () -> { if (it.price > 0 && it.qty == 0) it.qty = 1; priceEditFor = null; rebuildBody(); refreshTotal(); });
-            er.addView(ok, okp);
-            LinearLayout.LayoutParams erp = lp(MATCH, WRAP); erp.topMargin = dp(this, 8);
-            card.addView(er, erp);
-            posUi.post(pe::requestFocus);
-        }
-
-        // ---- ช่องโน้ตต่อเมนู ----
-        if (noteEditFor == it) {
-            LinearLayout nr = row(this);
-            final EditText ne = input(this, "โน้ต เช่น ไม่ใส่ผัก / เผาสุกมาก");
-            ne.setText(it.note);
-            ne.addTextChangedListener(new TextWatcher() {
-                @Override public void beforeTextChanged(CharSequence c,int a,int b,int d) {}
-                @Override public void onTextChanged(CharSequence c,int a,int b,int d) { it.note = c.toString(); refreshPreview(); }
-                @Override public void afterTextChanged(Editable e) {}
-            });
-            watchKeyboard(ne);
-            nr.addView(ne, lpw(1));
-            TextView ok = text(this, "✓", 14, true, 0xFF15181F);
-            ok.setGravity(Gravity.CENTER);
-            ok.setBackground(glass(this, WHITE, 10, 0));
-            ok.setPadding(dp(this,12), dp(this,6), dp(this,12), dp(this,6));
-            LinearLayout.LayoutParams okp = lp(WRAP, WRAP); okp.leftMargin = dp(this,6);
-            Fx.onTap(ok, () -> { it.note = it.note.trim(); noteEditFor = null; rebuildBody(); });
-            nr.addView(ok, okp);
-            LinearLayout.LayoutParams nrp = lp(MATCH, WRAP); nrp.topMargin = dp(this, 8);
-            card.addView(nr, nrp);
-            posUi.post(ne::requestFocus);
-        }
-
         Fx.onTap(card, () -> addOne(it));
         Fx.onHold(card, () -> openMenuEditor(catIdx, itemIdx));
         return card;
+    }
+
+    /** แถบใส่ราคา/โน้ต — วางเหนือรายการเมนู จะไม่โดนคีย์บอร์ดบังและไม่ทำให้รายการหาย */
+    private void refreshEditorBar() {
+        if (editorBar == null) return;
+        editorBar.removeAllViews();
+        final MenuData.Item it = priceEditFor != null ? priceEditFor : noteEditFor;
+        if (it == null) { editorBar.setVisibility(View.GONE); setBodyHeight(BODY_TALL); return; }
+        final boolean priceMode = priceEditFor != null;
+
+        editorBar.setVisibility(View.VISIBLE);
+        editorBar.setBackground(glass(this, priceMode ? 0x33FFD18F : 0x33B5D4F4, 14,
+                priceMode ? 0x88FFD18F : 0x88B5D4F4));
+        editorBar.setPadding(dp(this,12), dp(this,9), dp(this,12), dp(this,10));
+
+        TextView title = text(this, (priceMode ? "💰 ใส่ราคา: " : "📝 โน้ต: ") + it.name, 12, true, WHITE);
+        editorBar.addView(title, lp(MATCH, WRAP));
+
+        LinearLayout r = row(this);
+        final EditText e = input(this, priceMode ? "ราคา (บาท)" : "เช่น ไม่ใส่ผัก / เผาสุกมาก");
+        if (priceMode) {
+            e.setInputType(InputType.TYPE_CLASS_NUMBER);
+            if (it.price > 0) e.setText(String.valueOf(it.price));
+        } else {
+            e.setText(it.note);
+        }
+        e.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence c,int a,int b,int d) {}
+            @Override public void onTextChanged(CharSequence c,int a,int b,int d) {
+                if (priceMode) {
+                    try { it.price = Integer.parseInt(c.toString().trim()); } catch (Exception ex) { it.price = 0; }
+                    if (it.qty == 0 && it.price > 0) it.qty = 1;
+                    refreshTotal();
+                } else {
+                    it.note = c.toString();
+                }
+                refreshPreview();
+            }
+            @Override public void afterTextChanged(Editable ed) {}
+        });
+        watchKeyboard(e);
+        r.addView(e, lpw(1));
+
+        TextView ok = text(this, "✓ เสร็จ", 13, true, 0xFF15181F);
+        ok.setGravity(Gravity.CENTER);
+        ok.setBackground(glass(this, WHITE, 11, 0));
+        ok.setPadding(dp(this,14), dp(this,10), dp(this,14), dp(this,10));
+        LinearLayout.LayoutParams okp = lp(WRAP, WRAP); okp.leftMargin = dp(this,6);
+        Fx.onTap(ok, () -> {
+            if (priceMode && it.price > 0 && it.qty == 0) it.qty = 1;
+            if (!priceMode) it.note = it.note.trim();
+            priceEditFor = null; noteEditFor = null;
+            hideKeyboard(e);
+            rebuildBody(); refreshTotal();
+        });
+        r.addView(ok, okp);
+        LinearLayout.LayoutParams rl = lp(MATCH, WRAP); rl.topMargin = dp(this, 6);
+        editorBar.addView(r, rl);
+
+        posUi.post(() -> {
+            e.requestFocus();
+            e.setSelection(e.getText().length());
+            android.view.inputmethod.InputMethodManager imm =
+                    (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null) imm.showSoftInput(e, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        });
+    }
+
+    private void hideKeyboard(View v) {
+        try {
+            android.view.inputmethod.InputMethodManager imm =
+                    (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null) imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+        } catch (Exception ignored) {}
     }
 
     /** กด + / แตะการ์ด: เมนูกำหนดเองที่ยังไม่มีราคา → เปิดช่องใส่ราคาก่อน */
