@@ -797,6 +797,77 @@ public class BubbleService extends Service {
         return t;
     }
 
+    /** แถบใส่ราคา/โน้ต — วางเหนือรายการเมนู จะไม่โดนคีย์บอร์ดบังและไม่ทำให้รายการหาย */
+    private void refreshEditorBar() {
+        if (editorBar == null) return;
+        editorBar.removeAllViews();
+        final MenuData.Item it = priceEditFor != null ? priceEditFor : noteEditFor;
+        if (it == null) { editorBar.setVisibility(View.GONE); setBodyHeight(BODY_TALL); return; }
+        final boolean priceMode = priceEditFor != null;
+
+        editorBar.setVisibility(View.VISIBLE);
+        editorBar.setBackground(surfaceTint(this, 16, priceMode ? 0x88FFB84D : 0x88A78BFA));
+        editorBar.setPadding(dp(this,12), dp(this,9), dp(this,12), dp(this,10));
+
+        TextView title = text(this, (priceMode ? "💰 ใส่ราคา: " : "📝 โน้ต: ") + it.name, 12, true, WHITE);
+        editorBar.addView(title, lp(MATCH, WRAP));
+
+        LinearLayout r = row(this);
+        final EditText e = input(this, priceMode ? "ราคา (บาท)" : "เช่น ไม่ใส่ผัก / เผาสุกมาก");
+        if (priceMode) {
+            e.setInputType(InputType.TYPE_CLASS_NUMBER);
+            if (it.price > 0) e.setText(String.valueOf(it.price));
+        } else {
+            e.setText(it.note);
+        }
+        e.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence c,int a,int b,int d) {}
+            @Override public void onTextChanged(CharSequence c,int a,int b,int d) {
+                if (priceMode) {
+                    try { it.price = Integer.parseInt(c.toString().trim()); } catch (Exception ex) { it.price = 0; }
+                    if (it.qty == 0 && it.price > 0) it.qty = 1;
+                    refreshTotal();
+                } else {
+                    it.note = c.toString();
+                }
+                refreshPreview();
+            }
+            @Override public void afterTextChanged(Editable ed) {}
+        });
+        watchKeyboard(e);
+        r.addView(e, lpw(1));
+
+        TextView ok = button(this, "✓ เสร็จ", primary(this, 14), 13);
+        ok.setPadding(dp(this,14), dp(this,10), dp(this,14), dp(this,10));
+        LinearLayout.LayoutParams okp = lp(WRAP, WRAP); okp.leftMargin = dp(this,6);
+        Fx.onTap(ok, () -> {
+            if (priceMode && it.price > 0 && it.qty == 0) it.qty = 1;
+            if (!priceMode) it.note = it.note.trim();
+            priceEditFor = null; noteEditFor = null;
+            hideKeyboard(e);
+            rebuildBody(); refreshTotal();
+        });
+        r.addView(ok, okp);
+        LinearLayout.LayoutParams rl = lp(MATCH, WRAP); rl.topMargin = dp(this, 6);
+        editorBar.addView(r, rl);
+
+        posUi.post(() -> {
+            e.requestFocus();
+            e.setSelection(e.getText().length());
+            android.view.inputmethod.InputMethodManager imm =
+                    (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null) imm.showSoftInput(e, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        });
+    }
+
+    private void hideKeyboard(View v) {
+        try {
+            android.view.inputmethod.InputMethodManager imm =
+                    (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null) imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+        } catch (Exception ignored) {}
+    }
+
     /** กด + / แตะการ์ด: เมนูกำหนดเองที่ยังไม่มีราคา → เปิดช่องใส่ราคาก่อน */
     private void addOne(MenuData.Item it) {
         if (it.custom && it.price <= 0) {
