@@ -61,6 +61,17 @@ public class BubbleService extends Service {
     private MenuData.Item noteEditFor = null, priceEditFor = null;   // การ์ดที่กำลังเปิดช่องโน้ต/ราคา
     private LinearLayout editorBar;
     private String editingId = null;        // กำลังแก้ไขออเดอร์ที่ส่งไปแล้ว (id บนคลาวด์)
+    private String editingPrevText = "";    // ข้อความก่อนแก้ (ให้ POS ไฮไลต์ส่วนที่เปลี่ยน)
+    private String orderNote = "";          // โน้ตภาพรวมของออเดอร์ (แยกจากโน้ตต่อเมนู)
+    private String expandedLogId = null;    // การ์ดประวัติที่กางรายละเอียดอยู่
+    private final Runnable harvestTick = new Runnable() {
+        @Override public void run() {
+            int every = PosSender.harvestEvery(BubbleService.this);
+            if (every > 0 && System.currentTimeMillis() - PosSender.harvestLast(BubbleService.this) >= every * 60000L)
+                sendHarvest(true);
+            posUi.postDelayed(this, 60000);
+        }
+    };
     private String editingLabel = "";
     private TextView posBtn;                                   // แถบใส่ราคา/โน้ต อยู่เหนือรายการ (ไม่โดนคีย์บอร์ดบัง)
     private List<TextView> filterChips = new ArrayList<>();
@@ -114,6 +125,7 @@ public class BubbleService extends Service {
         startForegroundNotif();
         addBubble();
         posUi.postDelayed(bgPoll, 4000);
+        posUi.postDelayed(harvestTick, 30000);
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -389,7 +401,7 @@ public class BubbleService extends Service {
         Fx.onCopyTap(posBtn, this::sendToPos);
         TextView clearBtn = button(this, "ล้าง", glass(this, SURFACE_2, 16, LINE), 14);
         clearBtn.setTextColor(WHITE_DIM);
-        Fx.onTap(clearBtn, () -> { MsgBuilder.clear(cats); shipFee = -1; rebuildBody(); refreshTotal(); });
+        Fx.onTap(clearBtn, () -> { MsgBuilder.clear(cats); shipFee = -1; orderNote = ""; buildPayRows(); rebuildBody(); refreshTotal(); });
         acts.addView(copyBtn, lpw(1));
         LinearLayout.LayoutParams pbLp = lp(WRAP, WRAP); pbLp.leftMargin = dp(this, 7);
         acts.addView(posBtn, pbLp);
@@ -469,6 +481,19 @@ public class BubbleService extends Service {
         View gap = new View(this);
         staffPay.addView(gap, lp(MATCH, dp(this, 9)));
         staffPay.addView(payRow("สถานะชำระ", PAY_STATUS, false), lp(MATCH, WRAP));
+
+        // โน้ตภาพรวมออเดอร์ (แยกจากโน้ตต่อเมนู)
+        final EditText on = input(this, "📝 โน้ตออเดอร์ เช่น ส่งก่อน 6 โมง / โทรก่อนถึง");
+        on.setText(orderNote);
+        on.setTextSize(13);
+        on.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence c,int a,int b,int d) {}
+            @Override public void onTextChanged(CharSequence c,int a,int b,int d) { orderNote = c.toString(); refreshPreview(); }
+            @Override public void afterTextChanged(Editable e) {}
+        });
+        watchKeyboard(on);
+        LinearLayout.LayoutParams onl = lp(MATCH, WRAP); onl.topMargin = dp(this, 9);
+        staffPay.addView(on, onl);
     }
 
     private View payRow(String label, String[] options, boolean isChannel) {
@@ -521,8 +546,12 @@ public class BubbleService extends Service {
             ec.addView(text(this, "✏️ กำลังแก้ไข " + editingLabel, 12.5f, true, LAVENDER));
             ec.addView(text(this, "ปรับรายการแล้วกด \"อัปเดตออเดอร์\" — POS จะเด้งเตือนให้กดรับทราบใหม่", 10.5f, false, WHITE_DIM));
             eb.addView(ec, lpw(1));
+            TextView back = chip(this, "📋 สถานะ", false);
+            LinearLayout.LayoutParams bkl = lp(WRAP, WRAP); bkl.rightMargin = dp(this, 6);
+            Fx.onTap(back, () -> { filter = F_POS; refreshFilters(); rebuildBody(); fetchPosOrders(); });
+            eb.addView(back, bkl);
             TextView cancel = chip(this, "ยกเลิก", false);
-            Fx.onTap(cancel, () -> { editingId = null; editingLabel = ""; MsgBuilder.clear(cats); shipFee = -1; refreshPosBtn(); rebuildBody(); refreshTotal(); });
+            Fx.onTap(cancel, () -> { editingId = null; editingLabel = ""; editingPrevText = ""; orderNote = ""; MsgBuilder.clear(cats); shipFee = -1; buildPayRows(); refreshPosBtn(); rebuildBody(); refreshTotal(); });
             eb.addView(cancel);
             LinearLayout.LayoutParams ebl = lp(MATCH, WRAP); ebl.bottomMargin = dp(this, 8);
             bodyBox.addView(eb, ebl);
@@ -602,6 +631,7 @@ public class BubbleService extends Service {
         new Thread(() -> {
             List<PosSender.OrderStatus> got = null;
             try { got = PosSender.fetchAll(BubbleService.this); } catch (Exception ignored) {}
+            try { PosSender.harvestRefresh(BubbleService.this); } catch (Exception ignored) {}
             final List<PosSender.OrderStatus> res = got;
             posUi.post(() -> {
                 posLoading = false;
@@ -640,6 +670,21 @@ public class BubbleService extends Service {
             bodyBox.addView(bn, bl);
         }
 
+        // ---- แจ้งเก็บกุ้งจากบ่อ ----
+        bodyBox.addView(harvestBox(), lp(MATCH, WRAP));
+
+        if (editingId != null) {
+            LinearLayout eb = row(this);
+            eb.setBackground(surfaceTint(this, 14, 0x88A78BFA));
+            eb.setPadding(dp(this,12), dp(this,9), dp(this,10), dp(this,9));
+            eb.addView(text(this, "✏️ กำลังแก้ไข " + editingLabel, 12.5f, true, LAVENDER), lpw(1));
+            TextView go = chip(this, "กลับไปแก้ไข", false);
+            Fx.onTap(go, () -> { filter = "ทั้งหมด"; refreshFilters(); rebuildBody(); });
+            eb.addView(go);
+            LinearLayout.LayoutParams ebl = lp(MATCH, WRAP); ebl.topMargin = dp(this, 8); ebl.bottomMargin = dp(this, 4);
+            bodyBox.addView(eb, ebl);
+        }
+
         List<PosSender.SendLog> logs = PosSender.logList(this);
 
         if (logs.isEmpty() && posOrders.isEmpty()) {
@@ -676,15 +721,44 @@ public class BubbleService extends Service {
                     "ส่งเมื่อ " + l.clock() + " น. · " + l.ago()
                             + (l.total > 0 ? "  •  " + l.total + " บาท" : "")
                             + (l.edits > 0 ? "  •  แก้ไข " + l.edits + " ครั้ง" : ""));
-            if (l.ok && !l.id.isEmpty() && !l.lines.isEmpty()) {
-                final PosSender.SendLog fl = l;
-                TextView edit = chip(this, "✏️", false);
-                edit.setPadding(dp(this,10), dp(this,8), dp(this,10), dp(this,8));
-                LinearLayout.LayoutParams elp = lp(WRAP, WRAP); elp.leftMargin = dp(this, 6);
-                Fx.onTap(edit, () -> loadForEdit(fl));
-                ((LinearLayout) pc).addView(edit, elp);
+            final PosSender.SendLog fl = l;
+            final boolean open = fl.id.equals(expandedLogId) || (fl.id.isEmpty() && expandedLogId != null && expandedLogId.equals("at:" + fl.at));
+            if (!l.lines.isEmpty()) {
+                TextView more = chip(this, open ? "▲" : "▼", false);
+                more.setPadding(dp(this,10), dp(this,8), dp(this,10), dp(this,8));
+                LinearLayout.LayoutParams mlp = lp(WRAP, WRAP); mlp.leftMargin = dp(this, 6);
+                ((LinearLayout) pc).addView(more, mlp);
+                Fx.onTap(pc, () -> { String key = fl.id.isEmpty() ? "at:" + fl.at : fl.id; expandedLogId = open ? null : key; rebuildBody(); });
+                Fx.onTap(more, () -> { String key = fl.id.isEmpty() ? "at:" + fl.at : fl.id; expandedLogId = open ? null : key; rebuildBody(); });
             }
             bodyBox.addView(pc, posCardLp());
+
+            // ---- กล่องรายละเอียดออเดอร์ ----
+            if (open && !l.lines.isEmpty()) {
+                LinearLayout box = col(this);
+                box.setBackground(surfaceTint(this, 16, 0x33FFFFFF));
+                box.setPadding(dp(this,14), dp(this,10), dp(this,14), dp(this,12));
+                for (String raw : l.lines.split("\n")) {
+                    String t = raw.trim();
+                    if (t.isEmpty() || t.startsWith("order")) continue;
+                    boolean isTotal = t.startsWith("ยอดรวม");
+                    boolean isNote = t.startsWith("หมายเหตุ");
+                    boolean isPay = t.startsWith("ช่องทางชำระ") || t.startsWith("สถานะ");
+                    TextView tv = text(this, (isNote ? "📝 " : "") + t, isTotal ? 14 : 13, isTotal || isNote,
+                            isTotal ? MINT : isNote ? AMBER : isPay ? WHITE_DIM : WHITE);
+                    tv.setPadding(0, dp(this, 3), 0, dp(this, 3));
+                    box.addView(tv);
+                }
+                if (l.ok && !l.id.isEmpty()) {
+                    TextView editBtn = button(this, "✏️  แก้ไขออเดอร์นี้", glass(this, 0x26A78BFA, 14, LAVENDER), 13.5f);
+                    editBtn.setTextColor(LAVENDER);
+                    Fx.onTap(editBtn, () -> loadForEdit(fl));
+                    LinearLayout.LayoutParams ebl = lp(MATCH, WRAP); ebl.topMargin = dp(this, 10);
+                    box.addView(editBtn, ebl);
+                }
+                LinearLayout.LayoutParams bl = lp(MATCH, WRAP); bl.topMargin = -dp(this, 4); bl.bottomMargin = dp(this, 10);
+                bodyBox.addView(box, bl);
+            }
         }
 
         boolean headed = false;
@@ -1295,6 +1369,10 @@ public class BubbleService extends Service {
                 if (s.length() > 0) s.append("\n");
                 s.append("สถานะ : ").append(payStatus);
             }
+            if (!orderNote.trim().isEmpty()) {
+                if (s.length() > 0) s.append("\n");
+                s.append("หมายเหตุ : ").append(orderNote.trim());
+            }
             return s.toString();
         }
         return Store.prefs(this).getString("payline", "ชำระเงินคนละครึ่งหรือโอนธรรมดาครับ");
@@ -1381,6 +1459,72 @@ public class BubbleService extends Service {
         try { Toast.makeText(this, title, Toast.LENGTH_LONG).show(); } catch (Exception ignored) {}
     }
 
+    /** กล่อง "แจ้งเก็บกุ้งจากบ่อ" ในหน้าสถานะ POS */
+    private View harvestBox() {
+        LinearLayout box = col(this);
+        box.setBackground(surfaceTint(this, 16, 0x66FF6B4A));
+        box.setPadding(dp(this,12), dp(this,10), dp(this,12), dp(this,10));
+
+        LinearLayout h = row(this);
+        h.addView(text(this, "🦐 แจ้งพนักงานเก็บกุ้งจากบ่อ", 13, true, WHITE), lpw(1));
+        TextView now = button(this, "แจ้งตอนนี้", primary(this, 14), 12.5f);
+        now.setPadding(dp(this,14), dp(this,8), dp(this,14), dp(this,8));
+        Fx.onTap(now, () -> sendHarvest(false));
+        h.addView(now);
+        box.addView(h, lp(MATCH, WRAP));
+
+        LinearLayout r = row(this);
+        r.addView(text(this, "อัตโนมัติ", 11.5f, false, WHITE_DIM));
+        int cur = PosSender.harvestEvery(this);
+        int[] opts = {0, 30, 60};
+        String[] lbl = {"ปิด", "ทุก 30 นาที", "ทุก 60 นาที"};
+        for (int i = 0; i < opts.length; i++) {
+            final int v = opts[i];
+            TextView c = chip(this, lbl[i], cur == v);
+            c.setPadding(dp(this,11), dp(this,6), dp(this,11), dp(this,6));
+            LinearLayout.LayoutParams cl = lp(WRAP, WRAP); cl.leftMargin = dp(this, 6);
+            Fx.onTap(c, () -> {
+                PosSender.setHarvestEvery(this, v);
+                if (v > 0 && PosSender.harvestLast(this) == 0) Store.prefs(this).edit().putLong(PosSender.K_HARVEST_LAST, System.currentTimeMillis()).apply();
+                rebuildBody();
+            });
+            r.addView(c, cl);
+        }
+        LinearLayout.LayoutParams rl = lp(MATCH, WRAP); rl.topMargin = dp(this, 8);
+        box.addView(r, rl);
+
+        String st;
+        long last = PosSender.harvestLast(this);
+        if (PosSender.harvestAt > 0) {
+            boolean acked = PosSender.harvestAck >= PosSender.harvestAt;
+            String when = new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(new java.util.Date(PosSender.harvestAt - PosSender.offset));
+            st = "ล่าสุด " + when + " น.  •  " + (acked ? "✅ POS รับทราบแล้ว" : "🔔 รอ POS กดรับทราบ");
+        } else if (last > 0) {
+            st = "ส่งล่าสุด " + new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(new java.util.Date(last)) + " น.";
+        } else st = "ยังไม่เคยแจ้ง";
+        if (cur > 0) {
+            long next = Math.max(0, (last + cur * 60000L) - System.currentTimeMillis()) / 60000L;
+            st += "  •  ครั้งถัดไปอีก " + next + " นาที";
+        }
+        TextView stv = text(this, st, 11, false, PosSender.harvestAt > 0 && PosSender.harvestAck < PosSender.harvestAt ? AMBER : WHITE_DIM);
+        stv.setPadding(0, dp(this, 6), 0, 0);
+        box.addView(stv);
+        return box;
+    }
+
+    private void sendHarvest(boolean auto) {
+        new Thread(() -> {
+            String r;
+            try { PosSender.harvestNow(BubbleService.this); r = auto ? "🦐 แจ้งเก็บกุ้งอัตโนมัติแล้ว" : "🦐 แจ้ง POS ให้เก็บกุ้งแล้ว"; }
+            catch (Exception e) { r = "❌ แจ้งไม่สำเร็จ: " + e.getMessage(); }
+            final String m = r;
+            posUi.post(() -> {
+                try { Toast.makeText(BubbleService.this, m, Toast.LENGTH_LONG).show(); } catch (Exception ignored) {}
+                if (panelOpen && filter.equals(F_POS)) { fetchPosOrders(); rebuildBody(); }
+            });
+        }).start();
+    }
+
     private void refreshPosBtn() {
         if (posBtn == null) return;
         boolean e = editingId != null;
@@ -1392,7 +1536,8 @@ public class BubbleService extends Service {
     /** โหลดออเดอร์ที่ส่งไปแล้วกลับเข้าตะกร้าเพื่อแก้ไข */
     private void loadForEdit(PosSender.SendLog l) {
         MsgBuilder.clear(cats);
-        shipFee = -1; payChannel = ""; payStatus = "";
+        shipFee = -1; payChannel = ""; payStatus = ""; orderNote = "";
+        editingPrevText = l.lines;
         java.util.regex.Pattern item = java.util.regex.Pattern.compile("^(.*?)(?: x(\\d+))? (\\d+) บาท(?: \\((.*)\\))?$");
         java.util.regex.Pattern fee = java.util.regex.Pattern.compile("(\\d+) บาท$");
         int missed = 0;
@@ -1401,6 +1546,7 @@ public class BubbleService extends Service {
             if (t.isEmpty() || t.startsWith("order") || t.startsWith("ยอดรวม")) continue;
             if (t.startsWith("ช่องทางชำระ")) { int i = t.indexOf(":"); if (i > 0) payChannel = t.substring(i + 1).trim(); continue; }
             if (t.startsWith("สถานะ")) { int i = t.indexOf(":"); if (i > 0) payStatus = t.substring(i + 1).trim(); continue; }
+            if (t.startsWith("หมายเหตุ")) { int i = t.indexOf(":"); if (i > 0) orderNote = t.substring(i + 1).trim(); continue; }
             if (t.startsWith("ส่งฟรี")) { shipFee = 0; continue; }
             if (t.startsWith("ค่าส่ง")) {
                 java.util.regex.Matcher fm = fee.matcher(t);
@@ -1465,7 +1611,7 @@ public class BubbleService extends Service {
             boolean ok = false;
             try {
                 if (editId != null) {
-                    PosSender.update(BubbleService.this, editId, no, dest, msg, total, pay, reopen);
+                    PosSender.update(BubbleService.this, editId, no, dest, msg, total, pay, reopen, editingPrevText);
                     key = editId;
                     result = "✅ อัปเดตออเดอร์แล้ว — รอ POS กดรับทราบ";
                 } else {
@@ -1485,8 +1631,9 @@ public class BubbleService extends Service {
                 posBanner = r;
                 posBannerAt = System.currentTimeMillis();
                 if (sent) {
-                    editingId = null; editingLabel = "";
+                    editingId = null; editingLabel = ""; editingPrevText = ""; orderNote = "";
                     MsgBuilder.clear(cats); shipFee = -1;
+                    if (staffPay != null) buildPayRows();
                     refreshPosBtn(); refreshTotal();
                 }
                 try { Toast.makeText(BubbleService.this, r, Toast.LENGTH_LONG).show(); } catch (Exception ignored) {}
@@ -1514,6 +1661,7 @@ public class BubbleService extends Service {
     @Override public void onDestroy() {
         super.onDestroy();
         posUi.removeCallbacks(bgPoll);
+        posUi.removeCallbacks(harvestTick);
         closePanel();
         if (bubbleView != null) { try { wm.removeView(bubbleView); } catch (Exception ignored) {} }
     }

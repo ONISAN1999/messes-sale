@@ -316,7 +316,7 @@ public class PosSender {
 
     /** แก้ไขออเดอร์เดิม (PATCH id เดิม) — POS จะเด้งเตือนให้กดรับทราบใหม่ */
     public static void update(Context c, String id, String orderNo, String place, String text,
-                              int total, String payInfo, boolean reopen) throws Exception {
+                              int total, String payInfo, boolean reopen, String prevText) throws Exception {
         String u = dbUrl(c);
         while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
         String endpoint = u + "/shops/" + shop(c) + "/orders/" + id + ".json";
@@ -330,6 +330,16 @@ public class PosSender {
         o.put("editedAt", new JSONObject().put(".sv", "timestamp"));
         o.put("edited", true);
         if (reopen) o.put("status", "ใหม่");     // เคยเสร็จแล้ว → กลับมาเป็นออเดอร์ใหม่
+        // รายการก่อนแก้ — ให้ POS ไฮไลต์ได้ว่าแก้ตรงไหน
+        JSONArray prev = new JSONArray();
+        if (prevText != null) {
+            for (String s : prevText.split("\n")) {
+                String t = s.trim();
+                if (t.isEmpty() || t.startsWith("ยอดรวม") || t.startsWith("order")) continue;
+                prev.put(t);
+            }
+        }
+        o.put("prevLines", prev);
         JSONArray lines = new JSONArray();
         if (text != null) {
             for (String s : text.split("\n")) {
@@ -354,5 +364,60 @@ public class PosSender {
         int code = con.getResponseCode();
         con.disconnect();
         if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
+    }
+
+    /* ============ แจ้งเตือนเก็บกุ้งจากบ่อ ============ */
+    public static final String K_HARVEST_EVERY = "harvest_every";   // 0 = ปิด, 30, 60 นาที
+    public static final String K_HARVEST_LAST  = "harvest_last";
+    public static long harvestAt = 0, harvestAck = 0;                // สถานะล่าสุดจากคลาวด์
+
+    public static int harvestEvery(Context c) { return Store.prefs(c).getInt(K_HARVEST_EVERY, 0); }
+    public static void setHarvestEvery(Context c, int m) { Store.prefs(c).edit().putInt(K_HARVEST_EVERY, m).apply(); }
+    public static long harvestLast(Context c) { return Store.prefs(c).getLong(K_HARVEST_LAST, 0); }
+
+    private static String harvestUrl(Context c) {
+        String u = dbUrl(c);
+        while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
+        return u + "/shops/" + shop(c) + "/harvest.json";
+    }
+
+    /** ส่งสัญญาณ "เก็บกุ้ง" ไปเครื่อง POS — background thread */
+    public static void harvestNow(Context c) throws Exception {
+        JSONObject o = new JSONObject();
+        o.put("at", new JSONObject().put(".sv", "timestamp"));
+        o.put("every", harvestEvery(c));
+        o.put("by", "มือถือ");
+        HttpURLConnection con = (HttpURLConnection) new URL(harvestUrl(c)).openConnection();
+        con.setConnectTimeout(9000); con.setReadTimeout(12000);
+        con.setRequestMethod("POST");
+        con.setRequestProperty("X-HTTP-Method-Override", "PATCH");
+        con.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        con.setDoOutput(true);
+        OutputStream os = con.getOutputStream(); os.write(o.toString().getBytes("UTF-8")); os.close();
+        int code = con.getResponseCode(); con.disconnect();
+        if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
+        Store.prefs(c).edit().putLong(K_HARVEST_LAST, System.currentTimeMillis()).apply();
+    }
+
+    /** อ่านสถานะล่าสุด (at / ack) — background thread */
+    public static void harvestRefresh(Context c) throws Exception {
+        HttpURLConnection con = (HttpURLConnection) new URL(harvestUrl(c)).openConnection();
+        con.setConnectTimeout(9000); con.setReadTimeout(12000);
+        con.setRequestMethod("GET");
+        int code = con.getResponseCode();
+        java.io.InputStream in = (code >= 200 && code < 300) ? con.getInputStream() : con.getErrorStream();
+        String body = "";
+        if (in != null) {
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[2048]; int n;
+            while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+            in.close(); body = new String(bos.toByteArray(), "UTF-8");
+        }
+        con.disconnect();
+        if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
+        if (body.isEmpty() || body.equals("null")) { harvestAt = 0; harvestAck = 0; return; }
+        JSONObject o = new JSONObject(body);
+        harvestAt = o.optLong("at", 0);
+        harvestAck = o.optLong("ack", 0);
     }
 }
