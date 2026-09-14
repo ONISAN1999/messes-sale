@@ -60,6 +60,10 @@ public class BubbleService extends Service {
     private boolean syncingPlace = false;
     private MenuData.Item noteEditFor = null, priceEditFor = null;   // การ์ดที่กำลังเปิดช่องโน้ต/ราคา
     private LinearLayout editorBar;
+    private boolean bubbleHidden = false;   // ซ่อนฟองชั่วคราว (แอปยังทำงาน)
+    private long downAt = 0;                // เวลากดฟอง (ไว้จับกดค้าง)
+    private static final int MODE_CARD = 2; // โหมดการ์ดคำพูด (คัดลอกอย่างเดียว)
+    private TextView segCard;
     private String editingId = null;        // กำลังแก้ไขออเดอร์ที่ส่งไปแล้ว (id บนคลาวด์)
     private String editingPrevText = "";    // ข้อความก่อนแก้ (ให้ POS ไฮไลต์ส่วนที่เปลี่ยน)
     private String orderNote = "";          // โน้ตภาพรวมของออเดอร์ (แยกจากโน้ตต่อเมนู)
@@ -129,6 +133,9 @@ public class BubbleService extends Service {
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        String act = intent == null ? null : intent.getStringExtra("act");
+        if ("toggle".equals(act)) { setBubbleHidden(!bubbleHidden); return START_STICKY; }
+        if ("quit".equals(act)) { stopSelf(); return START_NOT_STICKY; }
         if (intent != null && intent.getBooleanExtra("reload", false)) {
             cards = Store.loadCards(this);
             cats = Store.loadMenu(this);
@@ -142,16 +149,39 @@ public class BubbleService extends Service {
         NotificationChannel ch = new NotificationChannel(CH, "Messes Sale", NotificationManager.IMPORTANCE_MIN);
         ch.setShowBadge(false);
         nm.createNotificationChannel(ch);
+        startForeground(1, buildNotif());
+    }
+
+    /** แจ้งเตือนถาวร: มีปุ่ม ซ่อน/แสดงฟอง และ ปิดแอป */
+    private Notification buildNotif() {
         PendingIntent pi = PendingIntent.getActivity(this, 0,
                 new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
-        Notification n = new Notification.Builder(this, CH)
-                .setContentTitle("Messes Sale พร้อมใช้งาน")
-                .setContentText("แตะฟองลอยเพื่อเปิดเมนู")
+        PendingIntent toggle = PendingIntent.getService(this, 1,
+                new Intent(this, BubbleService.class).putExtra("act", "toggle"),
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent quit = PendingIntent.getService(this, 2,
+                new Intent(this, BubbleService.class).putExtra("act", "quit"),
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        return new Notification.Builder(this, CH)
+                .setContentTitle(bubbleHidden ? "Messes Sale — ซ่อนฟองอยู่" : "Messes Sale พร้อมใช้งาน")
+                .setContentText(bubbleHidden ? "กด \"แสดงฟอง\" เพื่อเรียกกลับมา" : "แตะฟองเพื่อเปิด • กดค้างที่ฟองเพื่อซ่อน")
                 .setSmallIcon(android.R.drawable.ic_menu_edit)
                 .setContentIntent(pi)
                 .setOngoing(true)
+                .addAction(new Notification.Action.Builder(null, bubbleHidden ? "🦐 แสดงฟอง" : "👁 ซ่อนฟอง", toggle).build())
+                .addAction(new Notification.Action.Builder(null, "✕ ปิดแอป", quit).build())
                 .build();
-        startForeground(1, n);
+    }
+
+    private void setBubbleHidden(boolean hide) {
+        bubbleHidden = hide;
+        if (hide && panelOpen) closePanel();
+        if (bubbleView != null) bubbleView.setVisibility(hide ? View.GONE : View.VISIBLE);
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            nm.notify(1, buildNotif());
+        } catch (Exception ignored) {}
+        try { Toast.makeText(this, hide ? "ซ่อนฟองแล้ว — เรียกกลับได้จากแถบแจ้งเตือน" : "แสดงฟองแล้ว", Toast.LENGTH_SHORT).show(); } catch (Exception ignored) {}
     }
 
     private int wtype() {
@@ -182,6 +212,7 @@ public class BubbleService extends Service {
                     case MotionEvent.ACTION_DOWN:
                         ix = bubbleParams.x; iy = bubbleParams.y;
                         tx = e.getRawX(); ty = e.getRawY(); moved = false;
+                        downAt = System.currentTimeMillis();
                         return true;
                     case MotionEvent.ACTION_MOVE:
                         int dx = (int)(e.getRawX() - tx), dy = (int)(e.getRawY() - ty);
@@ -190,7 +221,10 @@ public class BubbleService extends Service {
                         wm.updateViewLayout(bubbleView, bubbleParams);
                         return true;
                     case MotionEvent.ACTION_UP:
-                        if (!moved) togglePanel();
+                        if (!moved) {
+                            if (System.currentTimeMillis() - downAt >= 600) { Fx.buzz(BubbleService.this); setBubbleHidden(true); }
+                            else togglePanel();
+                        }
                         return true;
                 }
                 return false;
@@ -257,14 +291,17 @@ public class BubbleService extends Service {
         LinearLayout seg = row(this);
         seg.setBackground(glass(this, SURFACE, 16, LINE));
         seg.setPadding(dp(this,4), dp(this,4), dp(this,4), dp(this,4));
+        segCard = text(this, "Card", 12.5f, true, WHITE);
         segCustomer = text(this, "ตอบลูกค้า", 12.5f, true, WHITE);
         segStaff = text(this, "แจ้งพนักงาน", 12.5f, true, WHITE);
-        for (TextView t : new TextView[]{segCustomer, segStaff}) {
+        for (TextView t : new TextView[]{segCard, segCustomer, segStaff}) {
             t.setGravity(Gravity.CENTER);
             t.setPadding(0, dp(this,8), 0, dp(this,8));
         }
         Fx.onTap(segCustomer, () -> { mode = MsgBuilder.MODE_CUSTOMER; refreshSeg(); });
         Fx.onTap(segStaff, () -> { mode = MsgBuilder.MODE_STAFF; refreshSeg(); });
+        Fx.onTap(segCard, () -> { mode = MODE_CARD; refreshSeg(); });
+        seg.addView(segCard, lpw(0.8f));
         seg.addView(segCustomer, lpw(1));
         seg.addView(segStaff, lpw(1));
         LinearLayout.LayoutParams segLp = lp(MATCH, WRAP); segLp.topMargin = dp(this, 10);
@@ -1338,6 +1375,11 @@ public class BubbleService extends Service {
 
     /* ================= refresh ================= */
     private void refreshSeg() {
+        boolean card = mode == MODE_CARD;
+        if (segCard != null) {
+            segCard.setBackground(card ? glass(this, LAVENDER, 13, 0) : null);
+            segCard.setTextColor(WHITE);
+        }
         segCustomer.setBackground(mode == MsgBuilder.MODE_CUSTOMER ? glass(this, WHITE, 13, 0) : null);
         segCustomer.setTextColor(mode == MsgBuilder.MODE_CUSTOMER ? INK : WHITE);
         segStaff.setBackground(mode == MsgBuilder.MODE_STAFF ? glass(this, WHITE, 13, 0) : null);
@@ -1345,6 +1387,9 @@ public class BubbleService extends Service {
         int vis = mode == MsgBuilder.MODE_STAFF ? View.VISIBLE : View.GONE;
         staffRow.setVisibility(vis);
         if (staffPay != null) staffPay.setVisibility(vis);
+        // โหมด Card = โชว์เฉพาะการ์ดคำพูด (แตะเพื่อคัดลอก)
+        if (card && !filter.equals("คำพูด")) { filter = "คำพูด"; refreshFilters(); rebuildBody(); }
+        else if (!card && filter.equals("คำพูด")) { filter = "ทั้งหมด"; refreshFilters(); rebuildBody(); }
     }
 
     private void refreshFilters() {

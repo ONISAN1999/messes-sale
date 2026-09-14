@@ -26,6 +26,11 @@ public class MainActivity extends Activity {
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
+        // Android 13+ ต้องขอสิทธิ์แจ้งเตือน ไม่งั้นปุ่ม ซ่อน/แสดงฟอง บนแถบแจ้งเตือนจะไม่โผล่
+        if (android.os.Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 77);
+        }
 
         ScrollView sv = new ScrollView(this);
         sv.setBackgroundColor(INK);
