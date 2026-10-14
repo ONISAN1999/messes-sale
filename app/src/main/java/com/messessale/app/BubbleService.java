@@ -148,10 +148,36 @@ public class BubbleService extends Service {
         addBubble();
         posUi.postDelayed(bgPoll, 4000);
         posUi.postDelayed(harvestTick, 30000);
+        posUi.postDelayed(updateCheck, 20000);
+    }
+
+    /* ================= อัปเดตแอปอัตโนมัติจาก GitHub ================= */
+    private int updateNotified = 0;
+    private final Runnable updateCheck = new Runnable() {
+        @Override public void run() {
+            Updater.check(BubbleService.this, (ok, msg) -> {
+                if (ok && Updater.latestCode != updateNotified) {
+                    updateNotified = Updater.latestCode;
+                    Updater.notify(BubbleService.this, BubbleService.class);
+                    try { Toast.makeText(BubbleService.this, "🆕 " + msg + " — แตะปุ่ม 🆕 บนแผงเพื่ออัปเดต", Toast.LENGTH_LONG).show(); } catch (Exception ignored) {}
+                    if (panelOpen) { closePanel(); openPanel(); }
+                }
+            });
+            posUi.postDelayed(this, 6 * 3600000L);   // ตรวจทุก 6 ชม.
+        }
+    };
+
+    private void startUpdate() {
+        Toast.makeText(this, "⬇️ กำลังโหลดเวอร์ชันใหม่…", Toast.LENGTH_SHORT).show();
+        if (panelOpen) closePanel();
+        Runnable go = () -> Updater.install(this, (ok, msg) -> Toast.makeText(this, (ok ? "✅ " : "⚠️ ") + msg, Toast.LENGTH_LONG).show());
+        if (Updater.latestApk.isEmpty()) Updater.check(this, (ok, msg) -> { if (ok) go.run(); else Toast.makeText(this, msg, Toast.LENGTH_LONG).show(); });
+        else go.run();
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         String act = intent == null ? null : intent.getStringExtra("act");
+        if ("update".equals(act)) { startUpdate(); return START_STICKY; }
         if ("toggle".equals(act)) { setBubbleHidden(!bubbleHidden); return START_STICKY; }
         if ("quit".equals(act)) { stopSelf(); return START_NOT_STICKY; }
         if (intent != null && intent.getBooleanExtra("reload", false)) {
@@ -413,6 +439,12 @@ public class BubbleService extends Service {
         ((LinearLayout.LayoutParams) opacityBtn.getLayoutParams()).leftMargin = dp(this, 6);
         Fx.onTap(opacityBtn, this::showOpacityDialog);
         head.addView(opacityBtn);
+        if (Updater.available(this)) {
+            TextView up = chip(this, "🆕 v" + Updater.latestName, true);
+            LinearLayout.LayoutParams upl = lp(WRAP, WRAP); upl.leftMargin = dp(this, 6);
+            Fx.onTap(up, this::startUpdate);
+            head.addView(up, upl);
+        }
         TextView close = iconBtn(this, "✕");
         ((LinearLayout.LayoutParams) close.getLayoutParams()).leftMargin = dp(this, 6);
         Fx.onTap(close, this::closePanel);
@@ -2090,6 +2122,7 @@ public class BubbleService extends Service {
         super.onDestroy();
         posUi.removeCallbacks(bgPoll);
         posUi.removeCallbacks(harvestTick);
+        posUi.removeCallbacks(updateCheck);
         closePanel();
         if (bubbleView != null) { try { wm.removeView(bubbleView); } catch (Exception ignored) {} }
     }

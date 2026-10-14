@@ -45,8 +45,27 @@ public class MainActivity extends Activity {
 
         TextView sub = text(this, "ตัวช่วยตอบลูกค้า ร้านกุ้งเผาบังฟาน", 13, false, WHITE_DIM);
         sub.setGravity(Gravity.CENTER);
-        sub.setPadding(0, dp(this, 4), 0, dp(this, 20));
+        sub.setPadding(0, dp(this, 4), 0, dp(this, 10));
         root.addView(sub);
+
+        // ---- อัปเดตแอปจาก GitHub ----
+        final TextView upd = button(this, "🔄  ตรวจอัปเดตแอป", glass(this, SURFACE, 14, LINE), 14);
+        upd.setTextColor(TXT);
+        upd.setOnClickListener(v -> {
+            if (Updater.available(this)) {
+                upd.setText("⬇️  กำลังโหลด v" + Updater.latestName + "…");
+                Updater.install(this, (ok, msg) -> { Toast.makeText(this, msg, Toast.LENGTH_LONG).show(); upd.setText(ok ? "✅  กดยืนยันในหน้าต่างที่เด้งขึ้น" : "🔄  ลองอีกครั้ง"); });
+                return;
+            }
+            upd.setText("⏳  กำลังตรวจ…");
+            Updater.check(this, (ok, msg) -> {
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+                if (ok) { upd.setText("🆕  อัปเดตเป็น v" + Updater.latestName + " (แตะเพื่อติดตั้ง)"); upd.setBackground(glass(this, ACCENT, 14, 0)); upd.setTextColor(WHITE); }
+                else upd.setText("✅  " + msg);
+            });
+        });
+        LinearLayout.LayoutParams ul = lp(MATCH, WRAP); ul.bottomMargin = dp(this, 20);
+        root.addView(upd, ul);
 
         TextView start = button(this, "▶   เปิด Bubble ลอย", primary(this, 15), 16);
         start.setOnClickListener(v -> startBubble());
