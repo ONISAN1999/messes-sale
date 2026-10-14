@@ -12,26 +12,32 @@ import android.widget.TextView;
 /** สร้าง UI ด้วยโค้ด (ไม่ใช้ไฟล์ XML) — สไตล์ Vibrancy/กระจก */
 public class UI {
 
-    public static final int INK        = 0xFF0F1220;
-    public static final int WHITE      = 0xFFFFFFFF;
-    public static final int WHITE_DIM  = 0xCCFFFFFF;
-    public static final int GLASS      = 0x26FFFFFF;
-    public static final int GLASS_SOFT = 0x1AFFFFFF;
-    public static final int STROKE     = 0x59FFFFFF;
-    public static final int PANEL_BG   = 0xF6151A2B;
-    public static final int OK_GREEN   = 0xFFC9FFE0;
+    /* ---- ธีมสว่าง (เข้าชุดกับ POS ออเดอร์) ---- */
+    public static final int INK        = 0xFF1F2430;   // ตัวหนังสือหลัก
+    public static final int TXT        = 0xFF1F2430;
+    public static final int WHITE      = 0xFFFFFFFF;   // ใช้เป็นพื้นขาว / ตัวหนังสือบนปุ่มสี
+    public static final int WHITE_DIM  = 0xFF6B7280;   // ตัวหนังสือรอง (ชื่อเดิม คงไว้ให้โค้ดเก่า)
+    public static final int GLASS      = 0xFFF1F2F5;
+    public static final int GLASS_SOFT = 0xFFF7F8FA;
+    public static final int STROKE     = 0xFFDFE2E8;
+    public static final int PANEL_BG   = 0xFFF4F5F7;
+    public static final int OK_GREEN   = 0xFF139A4B;
 
-    /* ---- Modern clean palette ---- */
-    public static final int SURFACE    = 0xFF1C2236;   // การ์ด
-    public static final int SURFACE_2  = 0xFF262D45;   // การ์ดที่เลือก / ปุ่มรอง
-    public static final int LINE       = 0x1FFFFFFF;   // เส้นขอบบาง
-    public static final int ACCENT     = 0xFFFF6B4A;   // ส้มปะการัง (สีหลัก)
-    public static final int ACCENT_2   = 0xFFFF9A6C;
-    public static final int MINT       = 0xFF34D399;   // เขียวมิ้นต์ (ยอดเงิน/สำเร็จ)
-    public static final int AMBER      = 0xFFFFB84D;
-    public static final int SKY        = 0xFF5AB0FF;
-    public static final int LAVENDER   = 0xFFA78BFA;
-    public static final int MUTED      = 0x99FFFFFF;
+    public static final int SURFACE    = 0xFFFFFFFF;   // การ์ด
+    public static final int SURFACE_2  = 0xFFF1F2F5;   // การ์ดที่เลือก / ปุ่มรอง
+    public static final int LINE       = 0xFFE3E5EA;   // เส้นขอบบาง
+    public static final int ACCENT     = 0xFFF05A28;   // ส้ม (สีหลัก)
+    public static final int ACCENT_2   = 0xFFFF8A3D;
+    public static final int ACCENT_SOFT= 0xFFFFF1E8;
+    public static final int MINT       = 0xFF139A4B;   // เขียว (ยอดเงิน/สำเร็จ)
+    public static final int MINT_SOFT  = 0xFFE6F8EE;
+    public static final int AMBER      = 0xFFD97706;
+    public static final int AMBER_SOFT = 0xFFFFFBE6;
+    public static final int SKY        = 0xFF2563EB;
+    public static final int LAVENDER   = 0xFF7C3AED;
+    public static final int LAVENDER_SOFT = 0xFFEFE9FF;
+    public static final int RED        = 0xFFEF4444;
+    public static final int MUTED      = 0xFF8A91A0;
 
     /** สีประจำหมวดเมนู */
     public static int catAccent(String cat) {
@@ -46,9 +52,9 @@ public class UI {
     /** พื้นการ์ดแบบเรียบ: ปกติ = SURFACE + ขอบบาง, เลือกแล้ว = SURFACE_2 + ขอบสีหลัก */
     public static GradientDrawable surface(Context c, float radius, boolean on) {
         GradientDrawable g = new GradientDrawable();
-        g.setColor(on ? SURFACE_2 : SURFACE);
+        g.setColor(on ? 0xFFFFF8F4 : SURFACE);
         g.setCornerRadius(dp(c, radius));
-        g.setStroke(dp(c, on ? 1.5f : 1), on ? ACCENT : LINE);
+        g.setStroke(dp(c, on ? 1.5f : 1.5f), on ? ACCENT : LINE);
         return g;
     }
 
@@ -57,15 +63,15 @@ public class UI {
         GradientDrawable g = new GradientDrawable();
         g.setColor(SURFACE);
         g.setCornerRadius(dp(c, radius));
-        g.setStroke(dp(c, 1), strokeColor);
+        g.setStroke(dp(c, 1.5f), strokeColor);
         return g;
     }
 
     /** ปุ่มไอคอนกลม 36dp */
     public static TextView iconBtn(Context c, String glyph) {
-        TextView t = text(c, glyph, 14, false, WHITE);
+        TextView t = text(c, glyph, 14, false, TXT);
         t.setGravity(Gravity.CENTER);
-        t.setBackground(glass(c, SURFACE_2, 20, LINE));
+        t.setBackground(glass(c, SURFACE_2, 20, 0));
         int s = dp(c, 36);
         t.setLayoutParams(new LinearLayout.LayoutParams(s, s));
         t.setMinWidth(s); t.setMinHeight(s);
@@ -134,12 +140,12 @@ public class UI {
         return g;
     }
 
-    /** วงกลม bubble */
+    /** วงกลม bubble — ขาว ขอบส้ม */
     public static GradientDrawable bubbleBg(Context c) {
-        GradientDrawable g = new GradientDrawable(
-                GradientDrawable.Orientation.TL_BR, new int[]{ACCENT_2, ACCENT});
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(WHITE);
         g.setShape(GradientDrawable.OVAL);
-        g.setStroke(dp(c, 2.5f), 0xFFFFFFFF);
+        g.setStroke(dp(c, 3), ACCENT);
         return g;
     }
 
@@ -147,7 +153,7 @@ public class UI {
     public static GradientDrawable panelBg(Context c) {
         GradientDrawable g = new GradientDrawable();
         g.setColor(PANEL_BG);
-        float r = dp(c, 28);
+        float r = dp(c, 24);
         g.setCornerRadii(new float[]{r, r, r, r, 0, 0, 0, 0});
         g.setStroke(dp(c, 1), LINE);
         return g;
@@ -164,10 +170,10 @@ public class UI {
 
     /** ปุ่มกลม/แคปซูล กดได้ */
     public static TextView chip(Context c, String label, boolean selected) {
-        TextView t = text(c, label, 12.5f, true, selected ? WHITE : WHITE_DIM);
+        TextView t = text(c, label, 12.5f, true, selected ? ACCENT : TXT);
         t.setGravity(Gravity.CENTER);
         t.setPadding(dp(c, 14), dp(c, 8), dp(c, 14), dp(c, 8));
-        t.setBackground(selected ? glass(c, ACCENT, 20, 0) : glass(c, SURFACE_2, 20, LINE));
+        t.setBackground(selected ? glass(c, ACCENT_SOFT, 20, ACCENT) : glass(c, SURFACE, 20, LINE));
         return t;
     }
 
@@ -182,10 +188,10 @@ public class UI {
     public static EditText input(Context c, String hint) {
         EditText e = new EditText(c);
         e.setHint(hint);
-        e.setHintTextColor(0x80FFFFFF);
-        e.setTextColor(WHITE);
+        e.setHintTextColor(0xFF9AA1AE);
+        e.setTextColor(TXT);
         e.setTextSize(14);
-        e.setBackground(glass(c, SURFACE, 14, LINE));
+        e.setBackground(glass(c, SURFACE, 12, STROKE));
         e.setPadding(dp(c, 14), dp(c, 11), dp(c, 14), dp(c, 11));
         return e;
     }

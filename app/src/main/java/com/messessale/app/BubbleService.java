@@ -41,7 +41,14 @@ import static com.messessale.app.UI.*;
 public class BubbleService extends Service {
 
     private WindowManager wm;
-    private View bubbleView;
+    private View bubbleView;              // หน้าต่างฟอง (โปร่ง) = วงกลม + ป้ายแดง + จุดคลาวด์
+    private LinearLayout bubbleDisc;      // วงกลมขาวขอบส้ม
+    private android.widget.ImageView bubbleIcon;
+    private TextView bubbleEmoji;         // ใช้แทนไอคอนตอนสถานะพิเศษ (⏰ / ✅)
+    private TextView bubbleCount, bubbleBadge, bubbleDot;
+    private int bubbleState = 0;
+    private final java.util.Set<String> doneUnseen = new java.util.HashSet<>();   // POS กดเสร็จแล้ว แต่เจ้าของยังไม่เปิดดู          // 0 ปกติ / 1 รอ POS รับ / 2 เสร็จ / 3 เกิน 50 นาที / 4 ไม่มีเน็ต
+    private static final int BUB_DP = 62, BUB_PAD = 12, BUB_WIN = BUB_DP + BUB_PAD * 2;
     private LinearLayout panelView;
     private WindowManager.LayoutParams bubbleParams, panelParams;
     private boolean panelOpen = false;
@@ -104,6 +111,7 @@ public class BubbleService extends Service {
     private final Runnable bgPoll = new Runnable() {
         @Override public void run() {
             checkDoneOrders();
+            refreshBubble();
             posUi.postDelayed(this, BG_POLL_MS);
         }
     };
@@ -123,11 +131,11 @@ public class BubbleService extends Service {
     private static final String[] PAY_STATUS = {"ชำระแล้ว", "ชำระหน้าร้าน", "สแกนหน้าลูกค้า"};
 
     private static final String CH = "bubble_ch";
-    private static final int C_SHRIMP = 0xFFFFB3C6;
-    private static final int C_RICE   = 0xFFFFD18F;
-    private static final int C_ADDON  = 0xFFFFD18F;
-    private static final int C_SHIP   = 0xFF9FE1CB;
-    private static final int C_PHRASE = 0xFFB5D4F4;
+    private static final int C_SHRIMP = RED;
+    private static final int C_RICE   = AMBER;
+    private static final int C_ADDON  = AMBER;
+    private static final int C_SHIP   = MINT_SOFT;
+    private static final int C_PHRASE = SKY;
 
     @Override public IBinder onBind(Intent i) { return null; }
 
@@ -202,18 +210,63 @@ public class BubbleService extends Service {
 
     /* ================= Bubble ================= */
     private void addBubble() {
-        TextView b = text(this, "🦐", 27, false, WHITE);
+        android.widget.FrameLayout outer = new android.widget.FrameLayout(this);
+        int s = dp(this, BUB_DP), win = dp(this, BUB_WIN);
+
+        LinearLayout b = col(this);
         b.setGravity(Gravity.CENTER);
         b.setBackground(bubbleBg(this));
-        int s = dp(this, 62);
-        b.setElevation(dp(this, 14));
-        bubbleView = b;
+        b.setElevation(dp(this, 10));
+        android.widget.FrameLayout.LayoutParams bl = new android.widget.FrameLayout.LayoutParams(s, s);
+        bl.gravity = Gravity.CENTER;
+        outer.addView(b, bl);
+        bubbleDisc = b;
 
-        bubbleParams = new WindowManager.LayoutParams(s, s, wtype(),
+        bubbleIcon = new android.widget.ImageView(this);
+        bubbleIcon.setImageResource(R.drawable.ic_chat);
+        bubbleIcon.setColorFilter(ACCENT);
+        b.addView(bubbleIcon, lp(dp(this, 26), dp(this, 26)));
+        bubbleEmoji = text(this, "", 20, false, WHITE);
+        bubbleEmoji.setGravity(Gravity.CENTER);
+        bubbleEmoji.setVisibility(View.GONE);
+        b.addView(bubbleEmoji);
+        bubbleCount = text(this, "Messes", 9.5f, true, TXT);
+        bubbleCount.setGravity(Gravity.CENTER);
+        bubbleCount.setSingleLine(true);
+        b.addView(bubbleCount);
+
+        bubbleBadge = text(this, "", 11, true, WHITE);
+        bubbleBadge.setGravity(Gravity.CENTER);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(RED); bg.setCornerRadius(dp(this, 20)); bg.setStroke(dp(this, 2), WHITE);
+        bubbleBadge.setBackground(bg);
+        bubbleBadge.setMinWidth(dp(this, 22));
+        bubbleBadge.setPadding(dp(this, 5), 0, dp(this, 5), 0);
+        bubbleBadge.setElevation(dp(this, 14));
+        bubbleBadge.setVisibility(View.GONE);
+        android.widget.FrameLayout.LayoutParams bdl = new android.widget.FrameLayout.LayoutParams(WRAP, dp(this, 22));
+        bdl.gravity = Gravity.TOP | Gravity.END;
+        bdl.topMargin = dp(this, BUB_PAD - 6); bdl.rightMargin = dp(this, BUB_PAD - 6);
+        outer.addView(bubbleBadge, bdl);
+
+        bubbleDot = text(this, "", 1, false, 0);
+        GradientDrawable dg = new GradientDrawable();
+        dg.setShape(GradientDrawable.OVAL); dg.setColor(0xFF94A3B8); dg.setStroke(dp(this, 2), WHITE);
+        bubbleDot.setBackground(dg);
+        bubbleDot.setElevation(dp(this, 14));
+        int ds = dp(this, 13);
+        android.widget.FrameLayout.LayoutParams ndl = new android.widget.FrameLayout.LayoutParams(ds, ds);
+        ndl.gravity = Gravity.BOTTOM | Gravity.END;
+        ndl.bottomMargin = dp(this, BUB_PAD + 1); ndl.rightMargin = dp(this, BUB_PAD + 3);
+        outer.addView(bubbleDot, ndl);
+
+        bubbleView = outer;
+
+        bubbleParams = new WindowManager.LayoutParams(win, win, wtype(),
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT);
         bubbleParams.gravity = Gravity.TOP | Gravity.START;
-        bubbleParams.x = dp(this, 12);
-        bubbleParams.y = dp(this, 220);
+        bubbleParams.x = dp(this, 4);
+        bubbleParams.y = dp(this, 210);
 
         bubbleView.setOnTouchListener(new View.OnTouchListener() {
             int ix, iy; float tx, ty; boolean moved;
@@ -241,6 +294,66 @@ public class BubbleService extends Service {
             }
         });
         wm.addView(bubbleView, bubbleParams);
+        refreshBubble();
+    }
+
+    /** อัปเดตหน้าตาฟองตามสถานะออเดอร์บนคลาวด์ */
+    private void refreshBubble() {
+        if (bubbleDisc == null) return;
+        int active = 0, waiting = 0, doneNew = 0;
+        boolean overdue = false;
+        long cutoff = PosSender.now() - 12L * 3600000L;
+        for (PosSender.OrderStatus o : posOrders) {
+            if (o.createdAt <= cutoff) continue;
+            if (o.status.equals("เสร็จ")) { if (doneUnseen.contains(o.id)) doneNew++; continue; }
+            active++;
+            if (o.status.equals("ใหม่")) waiting++;
+            if (o.minAgo() >= OVERDUE_MIN) overdue = true;
+        }
+        long age = PosSender.lastOk == 0 ? Long.MAX_VALUE : System.currentTimeMillis() - PosSender.lastOk;
+        boolean net = PosSender.ready(this) && age >= 90000;
+        int st = net ? 4 : overdue ? 3 : waiting > 0 ? 1 : doneNew > 0 ? 2 : 0;
+
+        GradientDrawable dg = new GradientDrawable();
+        dg.setShape(GradientDrawable.OVAL);
+        dg.setColor(age < 20000 ? 0xFF22C55E : age < 90000 ? 0xFFFACC15 : RED);
+        dg.setStroke(dp(this, 2), WHITE);
+        bubbleDot.setBackground(dg);
+        bubbleBadge.setText(String.valueOf(waiting));
+        bubbleBadge.setVisibility(waiting > 0 && st != 3 && st != 4 ? View.VISIBLE : View.GONE);
+
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        String label; int txt; boolean emoji = false; String em = "";
+        switch (st) {
+            case 1: g.setColors(new int[]{ACCENT, ACCENT_2}); g.setStroke(dp(this, 3), WHITE); label = "รอ POS รับ"; txt = WHITE; bubbleIcon.setColorFilter(WHITE); break;
+            case 2: g.setColor(WHITE); g.setStroke(dp(this, 3), MINT); label = "เสร็จ " + doneNew; txt = MINT; emoji = true; em = "✅"; break;
+            case 3: g.setColors(new int[]{RED, 0xFFF97316}); g.setStroke(dp(this, 3), WHITE); label = "เกิน " + OVERDUE_MIN + " น."; txt = WHITE; emoji = true; em = "⏰"; break;
+            case 4: g.setColor(0xFFF1F2F5); g.setStroke(dp(this, 3), RED); label = "ไม่มีเน็ต"; txt = RED; bubbleIcon.setColorFilter(0xFF9AA1AE); break;
+            default: g.setColor(WHITE); g.setStroke(dp(this, 3), ACCENT); label = active > 0 ? active + " ออเดอร์" : "Messes"; txt = TXT; bubbleIcon.setColorFilter(ACCENT); break;
+        }
+        bubbleDisc.setBackground(g);
+        bubbleIcon.setVisibility(emoji ? View.GONE : View.VISIBLE);
+        bubbleEmoji.setVisibility(emoji ? View.VISIBLE : View.GONE);
+        bubbleEmoji.setText(em);
+        bubbleCount.setText(label);
+        bubbleCount.setTextColor(txt);
+
+        if (st != bubbleState) {
+            bubbleState = st;
+            if (st == 3) {
+                android.animation.ObjectAnimator a = android.animation.ObjectAnimator.ofFloat(bubbleDisc, View.ALPHA, 1f, 0.35f, 1f);
+                a.setDuration(1800);
+                a.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+                a.start();
+                bubbleDisc.setTag(a);
+            } else {
+                if (bubbleDisc.getTag() instanceof android.animation.Animator) ((android.animation.Animator) bubbleDisc.getTag()).cancel();
+                bubbleDisc.setTag(null);
+                bubbleDisc.setAlpha(1f);
+            }
+            if (st == 1 || st == 2) Fx.bounce(bubbleDisc);
+        }
     }
 
     /* ================= Panel ================= */
@@ -248,7 +361,7 @@ public class BubbleService extends Service {
 
     private GradientDrawable panelBgAlpha() {
         int a = Store.alpha(this);
-        int argb = (int)(a * 2.55f) << 24 | 0x151A2B;
+        int argb = (int)(a * 2.55f) << 24 | 0xF4F5F7;
         GradientDrawable g = new GradientDrawable();
         g.setColor(argb);
         float r = dp(this, 28);
@@ -259,17 +372,26 @@ public class BubbleService extends Service {
 
     private void openPanel() {
         cards = Store.loadCards(this);
+        doneUnseen.clear();
+        refreshBubble();
         panelView = col(this);
         panelView.setBackground(panelBgAlpha());
         panelView.setPadding(dp(this, 14), dp(this, 12), dp(this, 14), dp(this, 14));
         panelView.setElevation(dp(this, 16));
+
+        // ---- ที่จับลาก (bottom-sheet) ----
+        View grab = new View(this);
+        grab.setBackground(glass(this, 0xFFD4D8E0, 3, 0));
+        LinearLayout.LayoutParams gl = lp(dp(this, 40), dp(this, 5));
+        gl.gravity = Gravity.CENTER_HORIZONTAL; gl.bottomMargin = dp(this, 8);
+        panelView.addView(grab, gl);
 
         // ---- header ----
         LinearLayout head = row(this);
         // แถบจับ (grabber) ด้านบน
         LinearLayout titleCol = col(this);
         LinearLayout tRow = row(this);
-        tRow.addView(text(this, "🦐 Messes Sale", 16, true, WHITE));
+        tRow.addView(text(this, "Messes Sale", 16, true, TXT));
         TextView verT = text(this, ver(this), 10.5f, false, MUTED);
         verT.setPadding(dp(this, 6), 0, 0, 0);
         tRow.addView(verT);
@@ -299,12 +421,12 @@ public class BubbleService extends Service {
 
         // ---- segmented ----
         LinearLayout seg = row(this);
-        seg.setBackground(glass(this, SURFACE, 16, LINE));
-        seg.setPadding(dp(this,4), dp(this,4), dp(this,4), dp(this,4));
-        segCard = text(this, "Card", 12.5f, true, WHITE);
-        segCustomer = text(this, "ตอบลูกค้า", 12.5f, true, WHITE);
-        segStaff = text(this, "แจ้งพนักงาน", 12.5f, true, WHITE);
-        segOrders = text(this, "ออเดอร์", 12.5f, true, WHITE);
+        seg.setBackground(glass(this, SURFACE, 12, LINE));
+        seg.setPadding(dp(this,3), dp(this,3), dp(this,3), dp(this,3));
+        segCard = text(this, "Card", 12.5f, true, TXT);
+        segCustomer = text(this, "ตอบลูกค้า", 12.5f, true, TXT);
+        segStaff = text(this, "แจ้งพนักงาน", 12.5f, true, TXT);
+        segOrders = text(this, "ออเดอร์", 12.5f, true, TXT);
         for (TextView t : new TextView[]{segCard, segCustomer, segStaff, segOrders}) {
             t.setGravity(Gravity.CENTER);
             t.setPadding(0, dp(this,8), 0, dp(this,8));
@@ -386,7 +508,7 @@ public class BubbleService extends Service {
             @Override public void afterTextChanged(Editable s) {}
         });
         sRow.addView(searchInput, lpw(1));
-        TextView sClear = text(this, "✕", 14, true, WHITE);
+        TextView sClear = text(this, "✕", 14, true, TXT);
         sClear.setGravity(Gravity.CENTER);
         sClear.setBackground(glass(this, SURFACE_2, 14, LINE));
         sClear.setPadding(dp(this,13), dp(this,11), dp(this,13), dp(this,11));
@@ -419,17 +541,17 @@ public class BubbleService extends Service {
 
         // ---- พรีวิวข้อความ ----
         previewBox = col(this);
-        previewBox.setBackground(glass(this, 0x33000000, 13, STROKE));
+        previewBox.setBackground(glass(this, GLASS, 13, STROKE));
         previewBox.setPadding(dp(this,12), dp(this,10), dp(this,12), dp(this,10));
         previewBox.setVisibility(View.GONE);
         LinearLayout pHead = row(this);
         pHead.addView(text(this, "พรีวิวข้อความ", 11, false, WHITE_DIM), lpw(1));
-        TextView pClose = text(this, "ซ่อน", 11, true, 0xFFFFB3C6);
+        TextView pClose = text(this, "ซ่อน", 11, true, RED);
         Fx.onTap(pClose, this::togglePreview);
         pHead.addView(pClose);
         previewBox.addView(pHead, lp(MATCH, WRAP));
         ScrollView pSv = new ScrollView(this);
-        previewText = text(this, "", 11.5f, false, WHITE);
+        previewText = text(this, "", 11.5f, false, TXT);
         previewText.setPadding(0, dp(this,6), 0, 0);
         pSv.addView(previewText);
         previewBox.addView(pSv, lp(MATCH, dp(this, 130)));
@@ -446,7 +568,7 @@ public class BubbleService extends Service {
             copy(msg, "คัดลอกข้อความแล้ว");
         });
         posBtn = button(this, editingId != null ? "✏️  อัปเดตออเดอร์" : "🧾  ส่งเข้า POS",
-                glass(this, editingId != null ? 0x26A78BFA : 0x2634D399, 16, editingId != null ? LAVENDER : MINT), 14);
+                glass(this, editingId != null ? LAVENDER_SOFT : MINT_SOFT, 16, editingId != null ? LAVENDER : MINT), 14);
         posBtn.setTextColor(editingId != null ? LAVENDER : MINT);
         Fx.onCopyTap(posBtn, this::sendToPos);
         TextView clearBtn = button(this, "ล้าง", glass(this, SURFACE_2, 16, LINE), 14);
@@ -590,7 +712,7 @@ public class BubbleService extends Service {
 
         if (editingId != null && !filter.equals(F_POS)) {
             LinearLayout eb = row(this);
-            eb.setBackground(surfaceTint(this, 14, 0x88A78BFA));
+            eb.setBackground(surfaceTint(this, 14, LAVENDER));
             eb.setPadding(dp(this,12), dp(this,9), dp(this,10), dp(this,9));
             LinearLayout ec = col(this);
             ec.addView(text(this, "✏️ กำลังแก้ไข " + editingLabel, 12.5f, true, LAVENDER));
@@ -777,19 +899,19 @@ public class BubbleService extends Service {
 
             LinearLayout card = col(this);
             card.setBackground(surface(this, 16, picked));
-            if (picked) card.setBackground(surfaceTint(this, 16, manual ? MINT : 0x9934D399));
+            if (picked) card.setBackground(surfaceTint(this, 16, manual ? MINT : MINT));
             if (zoneEditFor != null && zoneEditFor.equals(d.id)) card.setBackground(surfaceTint(this, 16, AMBER));
             card.setPadding(dp(this,9), dp(this,8), dp(this,9), dp(this,9));
             card.setAlpha(done ? 0.6f : 1f);
 
             LinearLayout top = row(this);
             top.setGravity(Gravity.TOP);
-            TextView pl = text(this, d.place, 12.5f, true, WHITE);
+            TextView pl = text(this, d.place, 12.5f, true, TXT);
             pl.setMaxLines(2);
             top.addView(pl, lpw(1));
-            TextView badge = text(this, picked ? String.valueOf(seq + 1) : (done ? "✓" : ""), 13, true, manual ? INK : WHITE);
+            TextView badge = text(this, picked ? String.valueOf(seq + 1) : (done ? "✓" : ""), 13, true, picked ? (manual ? WHITE : MINT) : MUTED);
             badge.setGravity(Gravity.CENTER);
-            badge.setBackground(glass(this, picked ? (manual ? MINT : 0x6634D399) : 0x00000000, 20, picked ? (manual ? 0 : MINT) : 0x55FFFFFF));
+            badge.setBackground(glass(this, picked ? (manual ? MINT : MINT_SOFT) : 0x00000000, 20, picked ? (manual ? 0 : MINT) : LINE));
             int bs = dp(this, 26);
             LinearLayout.LayoutParams bl = lp(bs, bs); bl.leftMargin = dp(this, 4);
             top.addView(badge, bl);
@@ -809,9 +931,9 @@ public class BubbleService extends Service {
                 LinearLayout zr = row(this);
                 for (int z = 1; z <= 9; z++) {
                     final int zz = z;
-                    TextView zc = text(this, String.valueOf(z), 12, true, d.zone == z ? INK : WHITE);
+                    TextView zc = text(this, String.valueOf(z), 12, true, d.zone == z ? WHITE : TXT);
                     zc.setGravity(Gravity.CENTER);
-                    zc.setBackground(glass(this, d.zone == z ? AMBER : SURFACE_2, 10, d.zone == z ? 0 : LINE));
+                    zc.setBackground(glass(this, d.zone == z ? AMBER : SURFACE, 10, d.zone == z ? 0 : LINE));
                     int zs = dp(this, 24);
                     LinearLayout.LayoutParams zl = lp(zs, zs); zl.rightMargin = dp(this, 3);
                     Fx.onTap(zc, () -> saveZone(d.place, zz));
@@ -911,7 +1033,7 @@ public class BubbleService extends Service {
                 TextView num = text(this, String.valueOf(n++), 12, true, LAVENDER);
                 num.setMinWidth(dp(this, 20));
                 r.addView(num);
-                TextView pl = text(this, d.place, 12, true, WHITE);
+                TextView pl = text(this, d.place, 12, true, TXT);
                 pl.setMaxLines(1);
                 r.addView(pl, lpw(1));
                 TextView m = text(this, (d.zone > 0 ? "โซน " + d.zone : "ไม่มีโซน") + " · " + d.time, 10.5f, false, d.zone > 0 ? WHITE_DIM : AMBER);
@@ -951,7 +1073,7 @@ public class BubbleService extends Service {
         if (!PosSender.ready(this)) {
             TextView warn = text(this,
                     "ยังไม่ได้ตั้งลิงก์ POS — เปิดแอป Messes Sale แล้วใส่ลิงก์ฐานข้อมูลที่หัวข้อ \"ส่งออเดอร์เข้าเครื่อง POS\"",
-                    12.5f, false, 0xFFFFE6B8);
+                    12.5f, false, AMBER);
             warn.setPadding(dp(this,2), dp(this,10), 0, 0);
             bodyBox.addView(warn);
             return;
@@ -959,9 +1081,9 @@ public class BubbleService extends Service {
         // แถบแจ้งผลการส่งครั้งล่าสุด (แทน Toast ที่บางเครื่องไม่เด้ง)
         if (!posBanner.isEmpty() && System.currentTimeMillis() - posBannerAt < 120000L) {
             boolean good = posBanner.startsWith("✅");
-            TextView bn = text(this, posBanner, 12.5f, true, good ? 0xFF9FF0C4 : 0xFFFFB4B4);
-            bn.setBackground(glass(this, good ? 0x2622C55E : 0x26EF4444, 12,
-                    good ? 0x5522C55E : 0x55EF4444));
+            TextView bn = text(this, posBanner, 12.5f, true, good ? MINT : RED);
+            bn.setBackground(glass(this, good ? MINT_SOFT : 0xFFFEE2E2, 12,
+                    good ? MINT : RED));
             bn.setPadding(dp(this,12), dp(this,10), dp(this,12), dp(this,10));
             LinearLayout.LayoutParams bl = lp(MATCH, WRAP);
             bl.topMargin = dp(this,8); bl.bottomMargin = dp(this,6);
@@ -973,7 +1095,7 @@ public class BubbleService extends Service {
 
         if (editingId != null) {
             LinearLayout eb = row(this);
-            eb.setBackground(surfaceTint(this, 14, 0x88A78BFA));
+            eb.setBackground(surfaceTint(this, 14, LAVENDER));
             eb.setPadding(dp(this,12), dp(this,9), dp(this,10), dp(this,9));
             eb.addView(text(this, "✏️ กำลังแก้ไข " + editingLabel, 12.5f, true, LAVENDER), lpw(1));
             TextView go = chip(this, "กลับไปแก้ไข", false);
@@ -1033,7 +1155,7 @@ public class BubbleService extends Service {
 
             if (open && !l.lines.isEmpty()) {
                 LinearLayout box = col(this);
-                box.setBackground(surfaceTint(this, 16, 0x33FFFFFF));
+                box.setBackground(surfaceTint(this, 16, LINE));
                 box.setPadding(dp(this,14), dp(this,10), dp(this,14), dp(this,12));
                 for (String raw : l.lines.split("\n")) {
                     String t = raw.trim();
@@ -1047,7 +1169,7 @@ public class BubbleService extends Service {
                     box.addView(tv);
                 }
                 if (l.ok && !l.id.isEmpty()) {
-                    TextView editBtn = button(this, "✏️  แก้ไขออเดอร์นี้", glass(this, 0x26A78BFA, 14, LAVENDER), 13.5f);
+                    TextView editBtn = button(this, "✏️  แก้ไขออเดอร์นี้", glass(this, LAVENDER_SOFT, 14, LAVENDER), 13.5f);
                     editBtn.setTextColor(LAVENDER);
                     Fx.onTap(editBtn, () -> loadForEdit(fl));
                     LinearLayout.LayoutParams ebl = lp(MATCH, WRAP); ebl.topMargin = dp(this, 10);
@@ -1060,7 +1182,7 @@ public class BubbleService extends Service {
 
         LinearLayout foot = row(this);
         TextView tip = text(this, "🟡 รอ POS กดรับ   🟠 กำลังทำ   🟢 เสร็จแล้ว  (อัปเดตทุก 6 วิ)",
-                10.5f, false, 0xFF8FA0BD);
+                10.5f, false, MUTED);
         foot.addView(tip, lpw(1));
         if (fail > 0) {
             TextView clr = chip(this, "ล้างที่ส่งไม่สำเร็จ", false);
@@ -1091,7 +1213,7 @@ public class BubbleService extends Service {
         LinearLayout info = col(this);
         String head = (no == null || no.isEmpty() ? "ออเดอร์" : "ออเดอร์ที่ " + no)
                 + (place == null || place.isEmpty() ? "" : "  •  " + place);
-        info.addView(text(this, head, 13.5f, true, WHITE));
+        info.addView(text(this, head, 13.5f, true, TXT));
 
         TextView st2 = text(this, state, 12, true, color);
         st2.setPadding(0, dp(this,3), 0, 0);
@@ -1121,9 +1243,9 @@ public class BubbleService extends Service {
         ((LinearLayout.LayoutParams) d.getLayoutParams()).topMargin = dp(this, 6);
         ((LinearLayout.LayoutParams) d.getLayoutParams()).rightMargin = dp(this, 7);
         top.addView(d);
-        top.addView(text(this, it.name, 13, true, WHITE), lpw(1));
+        top.addView(text(this, it.name, 13, true, TXT), lpw(1));
         if (on) {
-            TextView noteBtn = text(this, "📝", 11, false, WHITE);
+            TextView noteBtn = text(this, "📝", 11, false, TXT);
             noteBtn.setGravity(Gravity.CENTER);
             noteBtn.setBackground(glass(this, it.note.isEmpty() ? SURFACE : LAVENDER, 9, it.note.isEmpty() ? LINE : 0));
             noteBtn.setPadding(dp(this,6), dp(this,2), dp(this,6), dp(this,2));
@@ -1134,7 +1256,7 @@ public class BubbleService extends Service {
                 rebuildBody();
             });
             top.addView(noteBtn, nbp);
-            TextView badge = text(this, "×" + it.qty, 11.5f, true, WHITE);
+            TextView badge = text(this, "×" + it.qty, 11.5f, true, TXT);
             badge.setGravity(Gravity.CENTER);
             badge.setBackground(glass(this, ACCENT, 20, 0));
             badge.setPadding(dp(this,8), dp(this,2), dp(this,8), dp(this,2));
@@ -1155,13 +1277,13 @@ public class BubbleService extends Service {
         String priceTxt = it.custom
                 ? (it.price > 0 ? it.price + " บาท ✎" : "กำหนดเอง ✎")
                 : (it.price + " บาท");
-        TextView priceLbl = text(this, priceTxt, 13, true, on ? WHITE : accent);
+        TextView priceLbl = text(this, priceTxt, 13, true, accent);
         priceLbl.setPadding(dp(this, 14), 0, 0, 0);
         if (it.custom) Fx.onTap(priceLbl, () -> { priceEditFor = it; noteEditFor = null; rebuildBody(); });
         bottom.addView(priceLbl, lpw(1));
 
         if (on) {
-            TextView minus = roundBtn("−", SURFACE, WHITE);
+            TextView minus = roundBtn("−", SURFACE, TXT);
             Fx.onTap(minus, () -> { it.qty--; rebuildBody(); refreshTotal(); });
             bottom.addView(minus);
             TextView plus2 = roundBtn("+", ACCENT, WHITE);
@@ -1169,7 +1291,7 @@ public class BubbleService extends Service {
             Fx.onTap(plus2, () -> addOne(it));
             bottom.addView(plus2);
         } else {
-            TextView plus = roundBtn("+", SURFACE_2, WHITE);
+            TextView plus = roundBtn("+", SURFACE_2, TXT);
             bottom.addView(plus);
         }
 
@@ -1201,10 +1323,10 @@ public class BubbleService extends Service {
         final boolean priceMode = priceEditFor != null;
 
         editorBar.setVisibility(View.VISIBLE);
-        editorBar.setBackground(surfaceTint(this, 16, priceMode ? 0x88FFB84D : 0x88A78BFA));
+        editorBar.setBackground(surfaceTint(this, 16, priceMode ? AMBER : LAVENDER));
         editorBar.setPadding(dp(this,12), dp(this,9), dp(this,12), dp(this,10));
 
-        TextView title = text(this, (priceMode ? "💰 ใส่ราคา: " : "📝 โน้ต: ") + it.name, 12, true, WHITE);
+        TextView title = text(this, (priceMode ? "💰 ใส่ราคา: " : "📝 โน้ต: ") + it.name, 12, true, TXT);
         editorBar.addView(title, lp(MATCH, WRAP));
 
         LinearLayout r = row(this);
@@ -1278,13 +1400,13 @@ public class BubbleService extends Service {
     /** ไทล์ ＋ เพิ่มเมนู ท้ายแต่ละหมวด */
     private View addMenuTile(int catIdx) {
         LinearLayout t = col(this);
-        t.setBackground(glass(this, 0x00000000, 18, 0x33FFFFFF));
+        t.setBackground(glass(this, 0x00000000, 18, LINE));
         t.setPadding(dp(this,9), dp(this,13), dp(this,9), dp(this,13));
         t.setGravity(Gravity.CENTER);
         TextView a = text(this, "＋ เพิ่มเมนู", 11.5f, true, WHITE_DIM);
         a.setGravity(Gravity.CENTER);
         t.addView(a);
-        TextView b = text(this, "กดค้างที่การ์ดเพื่อแก้ไข", 10.5f, false, 0xFF8FA0BD);
+        TextView b = text(this, "กดค้างที่การ์ดเพื่อแก้ไข", 10.5f, false, MUTED);
         b.setGravity(Gravity.CENTER);
         b.setPadding(0, dp(this,4), 0, 0);
         t.addView(b);
@@ -1333,7 +1455,7 @@ public class BubbleService extends Service {
             String lp2 = p.toLowerCase();
             if (!lp2.contains(q) || lp2.equals(q)) continue;
             final String pick = p;
-            TextView row = text(this, "📍  " + p, 12.5f, false, WHITE);
+            TextView row = text(this, "📍  " + p, 12.5f, false, TXT);
             row.setPadding(dp(this,12), dp(this,10), dp(this,12), dp(this,10));
             Fx.onTap(row, () -> {
                 field.setText(pick);
@@ -1350,7 +1472,7 @@ public class BubbleService extends Service {
     /* ---- delivery block ---- */
     private View shipBlock(MenuData.Cat cat) {
         LinearLayout box = col(this);
-        box.setBackground(surfaceTint(this, 18, 0x5534D399));
+        box.setBackground(surfaceTint(this, 18, MINT));
         box.setPadding(dp(this,12), dp(this,12), dp(this,12), dp(this,12));
 
         // เลือกค่าส่ง: ส่งฟรี / 10 / 20 / 30 / 40
@@ -1362,7 +1484,7 @@ public class BubbleService extends Service {
             final int fee = f;
             boolean on = (shipFee == fee);
             TextView c = chip(this, fee == 0 ? "ส่งฟรี" : (fee + " บาท"), on);
-            if (on) { c.setBackground(glass(this, 0xFF9FE1CB, 11, 0)); c.setTextColor(0xFF04342C); }
+            if (on) { c.setBackground(glass(this, MINT_SOFT, 11, 0)); c.setTextColor(MINT); }
             c.setPadding(dp(this,13), dp(this,7), dp(this,13), dp(this,7));
             LinearLayout.LayoutParams cp = lp(WRAP, WRAP); cp.rightMargin = dp(this,6);
             c.setLayoutParams(cp);
@@ -1383,9 +1505,9 @@ public class BubbleService extends Service {
         pRow.addView(placeField, lpw(1));
 
         // 💾 ปุ่มจำที่อยู่ — อยู่ติดปุ่ม ✕ มองเห็นเสมอ (เดิมชิป "＋ จำไว้" ถูกดันหลุดขอบเวลามีหอเยอะ)
-        TextView pSave = text(this, "💾 จำ", 13, true, 0xFF04342C);
+        TextView pSave = text(this, "💾 จำ", 13, true, MINT);
         pSave.setGravity(Gravity.CENTER);
-        pSave.setBackground(glass(this, 0xFF9FE1CB, 11, 0));
+        pSave.setBackground(glass(this, MINT_SOFT, 11, 0));
         pSave.setPadding(dp(this,13), dp(this,11), dp(this,13), dp(this,11));
         LinearLayout.LayoutParams psp = lp(WRAP, WRAP); psp.leftMargin = dp(this,6);
         pSave.setLayoutParams(psp);
@@ -1397,9 +1519,9 @@ public class BubbleService extends Service {
         });
         pRow.addView(pSave);
 
-        TextView pClear = text(this, "✕", 14, true, WHITE);
+        TextView pClear = text(this, "✕", 14, true, TXT);
         pClear.setGravity(Gravity.CENTER);
-        pClear.setBackground(glass(this, 0x33000000, 11, 0x669FE1CB));
+        pClear.setBackground(glass(this, GLASS, 11, MINT));
         pClear.setPadding(dp(this,13), dp(this,11), dp(this,13), dp(this,11));
         LinearLayout.LayoutParams pcp = lp(WRAP, WRAP); pcp.leftMargin = dp(this,6);
         pClear.setLayoutParams(pcp);
@@ -1408,7 +1530,7 @@ public class BubbleService extends Service {
 
         // ดรอปดาวน์แนะนำที่อยู่ใกล้เคียงกับที่พิมพ์
         final LinearLayout suggest = col(this);
-        suggest.setBackground(glass(this, 0x4D000000, 11, 0x669FE1CB));
+        suggest.setBackground(glass(this, GLASS, 11, MINT));
         suggest.setVisibility(View.GONE);
         LinearLayout.LayoutParams sgp = lp(MATCH, WRAP); sgp.topMargin = dp(this, 5);
         box.addView(suggest, sgp);
@@ -1434,7 +1556,7 @@ public class BubbleService extends Service {
         List<String> places = Store.loadPlaces(this);
         for (String p : places) {
             TextView c = chip(this, p, p.equals(place));
-            if (p.equals(place)) { c.setBackground(glass(this, 0xFF9FE1CB, 10, 0)); c.setTextColor(0xFF04342C); }
+            if (p.equals(place)) { c.setBackground(glass(this, MINT_SOFT, 10, 0)); c.setTextColor(MINT); }
             c.setPadding(dp(this,11), dp(this,5), dp(this,11), dp(this,5));
             LinearLayout.LayoutParams cp = lp(WRAP, WRAP); cp.rightMargin = dp(this,5);
             c.setLayoutParams(cp);
@@ -1454,7 +1576,7 @@ public class BubbleService extends Service {
     private View phraseCard(int idx) {
         Store.Card c = cards.get(idx);
         LinearLayout card = col(this);
-        card.setBackground(surfaceTint(this, 18, 0x55A78BFA));
+        card.setBackground(surfaceTint(this, 18, 0xFFD8CCFA));
         card.setElevation(dp(this, 2));
         card.setPadding(dp(this,10), dp(this,10), dp(this,10), dp(this,10));
 
@@ -1479,9 +1601,9 @@ public class BubbleService extends Service {
                     strip.addView(iv, ip);
                 }
                 if (c.images.size() > 3) {
-                    TextView more = text(this, "+" + (c.images.size() - 3), 12, true, WHITE);
+                    TextView more = text(this, "+" + (c.images.size() - 3), 12, true, TXT);
                     more.setGravity(Gravity.CENTER);
-                    more.setBackground(glass(this, 0x5031527A, 7, 0));
+                    more.setBackground(glass(this, 0xFF9AA1AE, 7, 0));
                     LinearLayout.LayoutParams mp = lpw(0.7f);
                     mp.height = dp(this, 52); mp.leftMargin = dp(this, 3);
                     strip.addView(more, mp);
@@ -1491,24 +1613,24 @@ public class BubbleService extends Service {
             }
         }
 
-        card.addView(text(this, c.title, 12.5f, true, WHITE));
+        card.addView(text(this, c.title, 12.5f, true, TXT));
         String preview = c.text.length() > 70 ? c.text.substring(0, 70) + "…" : c.text;
-        TextView tv = text(this, preview, 11, false, 0xE6FFFFFF);
+        TextView tv = text(this, preview, 11, false, 0xFF3A4150);
         tv.setPadding(0, dp(this, 3), 0, 0);
         card.addView(tv);
 
         // แถบท้ายการ์ด: แตะ = คัดลอก, ปุ่มปากกามุมขวา = แก้ไข
         LinearLayout foot = row(this);
         TextView hint = text(this, c.images.isEmpty() ? "📋 แตะเพื่อคัดลอก" : "🚀 แตะเพื่อส่งพร้อมรูป",
-                10.5f, true, 0xF2FFFFFF);
+                10.5f, true, TXT);
         hint.setGravity(Gravity.CENTER);
-        hint.setBackground(glass(this, 0x33000000, 9, 0x40FFFFFF));
+        hint.setBackground(glass(this, GLASS, 9, LINE));
         hint.setPadding(0, dp(this,6), 0, dp(this,6));
         foot.addView(hint, lpw(1));
 
-        TextView pen = text(this, "✏️", 12, true, WHITE);
+        TextView pen = text(this, "✏️", 12, true, TXT);
         pen.setGravity(Gravity.CENTER);
-        pen.setBackground(glass(this, 0x40000000, 9, 0x59FFFFFF));
+        pen.setBackground(glass(this, GLASS, 9, LINE));
         pen.setPadding(dp(this,10), dp(this,6), dp(this,10), dp(this,6));
         LinearLayout.LayoutParams pp = lp(WRAP, WRAP); pp.leftMargin = dp(this,6);
         pen.setLayoutParams(pp);
@@ -1531,13 +1653,13 @@ public class BubbleService extends Service {
 
     private View addCardTile() {
         LinearLayout t = col(this);
-        t.setBackground(glass(this, 0x00000000, 18, 0x33FFFFFF));
+        t.setBackground(glass(this, 0xFFFFF8F4, 18, 0xFFF5B79B));
         t.setPadding(dp(this,9), dp(this,14), dp(this,9), dp(this,14));
         t.setGravity(Gravity.CENTER);
-        TextView a = text(this, "＋ เพิ่มการ์ดใหม่", 11.5f, true, WHITE_DIM);
+        TextView a = text(this, "＋ เพิ่มการ์ดใหม่", 11.5f, true, ACCENT);
         a.setGravity(Gravity.CENTER);
         t.addView(a);
-        TextView b = text(this, "ข้อความ + รูปได้หลายรูป", 10.5f, false, 0xFF8FA0BD);
+        TextView b = text(this, "ข้อความ + รูปได้หลายรูป", 10.5f, false, MUTED);
         b.setGravity(Gravity.CENTER);
         b.setPadding(0, dp(this,4), 0, 0);
         t.addView(b);
@@ -1547,7 +1669,7 @@ public class BubbleService extends Service {
 
     private void setImg(ImageView iv, String uri) {
         try { iv.setImageURI(Uri.parse(uri)); } catch (Exception ignored) {}
-        iv.setBackground(glass(this, 0xFF2A4A6E, 7, 0));
+        iv.setBackground(glass(this, 0xFFEEF0F3, 7, 0));
         iv.setClipToOutline(true);
     }
 
@@ -1588,9 +1710,9 @@ public class BubbleService extends Service {
     /* ---- opacity ---- */
     private void showOpacityDialog() {
         LinearLayout box = col(this);
-        box.setBackground(glass(this, 0xF21E2134, 18, STROKE));
+        box.setBackground(glass(this, SURFACE, 18, STROKE));
         box.setPadding(dp(this,16), dp(this,14), dp(this,16), dp(this,14));
-        box.addView(text(this, "ความใสของแผง", 14, true, WHITE));
+        box.addView(text(this, "ความใสของแผง", 14, true, TXT));
         TextView val = text(this, Store.alpha(this) + "%", 12, false, WHITE_DIM);
         val.setPadding(0, dp(this,3), 0, dp(this,6));
         box.addView(val);
@@ -1625,17 +1747,17 @@ public class BubbleService extends Service {
         boolean card = mode == MODE_CARD;
         boolean ord = mode == MODE_ORDERS;
         if (segCard != null) {
-            segCard.setBackground(card ? glass(this, LAVENDER, 13, 0) : null);
-            segCard.setTextColor(WHITE);
+            segCard.setBackground(card ? glass(this, ACCENT, 10, 0) : null);
+            segCard.setTextColor(card ? WHITE : 0xFF6B7280);
         }
         if (segOrders != null) {
-            segOrders.setBackground(ord ? glass(this, MINT, 13, 0) : null);
-            segOrders.setTextColor(ord ? INK : WHITE);
+            segOrders.setBackground(ord ? glass(this, ACCENT, 10, 0) : null);
+            segOrders.setTextColor(ord ? WHITE : 0xFF6B7280);
         }
-        segCustomer.setBackground(mode == MsgBuilder.MODE_CUSTOMER ? glass(this, WHITE, 13, 0) : null);
-        segCustomer.setTextColor(mode == MsgBuilder.MODE_CUSTOMER ? INK : WHITE);
-        segStaff.setBackground(mode == MsgBuilder.MODE_STAFF ? glass(this, WHITE, 13, 0) : null);
-        segStaff.setTextColor(mode == MsgBuilder.MODE_STAFF ? INK : WHITE);
+        segCustomer.setBackground(mode == MsgBuilder.MODE_CUSTOMER ? glass(this, ACCENT, 10, 0) : null);
+        segCustomer.setTextColor(mode == MsgBuilder.MODE_CUSTOMER ? WHITE : 0xFF6B7280);
+        segStaff.setBackground(mode == MsgBuilder.MODE_STAFF ? glass(this, ACCENT, 10, 0) : null);
+        segStaff.setTextColor(mode == MsgBuilder.MODE_STAFF ? WHITE : 0xFF6B7280);
         int vis = mode == MsgBuilder.MODE_STAFF ? View.VISIBLE : View.GONE;
         staffRow.setVisibility(vis);
         if (staffPay != null) staffPay.setVisibility(vis);
@@ -1698,6 +1820,7 @@ public class BubbleService extends Service {
                     if (o.status.equals("เสร็จ") && !seen.contains(o.id) && "mobile".equals(o.by)) {
                         PosSender.markDoneSeen(BubbleService.this, o.id);
                         notifyDone(o.asLog());
+                        doneUnseen.add(o.id);
                     }
                 }
                 setOverdue(overdue);
@@ -1708,25 +1831,11 @@ public class BubbleService extends Service {
 
     /** ฟองแดงกระพริบช้าๆ เมื่อมีออเดอร์ค้างเกิน 50 นาที */
     private void setOverdue(boolean on) {
-        if (on == bubbleOverdue || bubbleView == null) return;
-        bubbleOverdue = on;
-        if (on) {
-            GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{0xFFFF4D4D, 0xFFB91C1C});
-            g.setShape(GradientDrawable.OVAL);
-            g.setStroke(dp(this, 2.5f), 0xFFFFFFFF);
-            bubbleView.setBackground(g);
-            android.animation.ObjectAnimator a = android.animation.ObjectAnimator.ofFloat(bubbleView, View.ALPHA, 1f, 0.35f, 1f);
-            a.setDuration(1800);
-            a.setRepeatCount(android.animation.ValueAnimator.INFINITE);
-            a.start();
-            bubbleView.setTag(a);
+        if (on != bubbleOverdue && on) {
             try { Toast.makeText(this, "⚠️ มีออเดอร์ค้างเกิน " + OVERDUE_MIN + " นาที", Toast.LENGTH_LONG).show(); } catch (Exception ignored) {}
-        } else {
-            if (bubbleView.getTag() instanceof android.animation.Animator) ((android.animation.Animator) bubbleView.getTag()).cancel();
-            bubbleView.setTag(null);
-            bubbleView.setAlpha(1f);
-            bubbleView.setBackground(bubbleBg(this));
         }
+        bubbleOverdue = on;
+        refreshBubble();
     }
 
     /** POS กดเสร็จแล้ว → เสียง + สั่น + แจ้งเตือน + ฟองเด้ง */
@@ -1771,7 +1880,7 @@ public class BubbleService extends Service {
         } catch (Exception ignored) {}
 
         // ฟองเด้ง + แถบในแผง
-        if (bubbleView != null) Fx.bounce(bubbleView);
+        if (bubbleDisc != null) Fx.bounce(bubbleDisc);
         posBanner = title + "  " + body;
         posBannerAt = System.currentTimeMillis();
         try { Toast.makeText(this, title, Toast.LENGTH_LONG).show(); } catch (Exception ignored) {}
@@ -1780,11 +1889,11 @@ public class BubbleService extends Service {
     /** กล่อง "แจ้งเก็บกุ้งจากบ่อ" ในหน้าสถานะ POS */
     private View harvestBox() {
         LinearLayout box = col(this);
-        box.setBackground(surfaceTint(this, 16, 0x66FF6B4A));
+        box.setBackground(surfaceTint(this, 16, ACCENT));
         box.setPadding(dp(this,12), dp(this,10), dp(this,12), dp(this,10));
 
         LinearLayout h = row(this);
-        h.addView(text(this, "🦐 แจ้งพนักงานเก็บกุ้งจากบ่อ", 13, true, WHITE), lpw(1));
+        h.addView(text(this, "🦐 แจ้งพนักงานเก็บกุ้งจากบ่อ", 13, true, TXT), lpw(1));
         TextView now = button(this, "แจ้งตอนนี้", primary(this, 14), 12.5f);
         now.setPadding(dp(this,14), dp(this,8), dp(this,14), dp(this,8));
         Fx.onTap(now, () -> sendHarvest(false));
@@ -1847,7 +1956,7 @@ public class BubbleService extends Service {
         if (posBtn == null) return;
         boolean e = editingId != null;
         posBtn.setText(e ? "✏️  อัปเดตออเดอร์" : "🧾  ส่งเข้า POS");
-        posBtn.setBackground(glass(this, e ? 0x26A78BFA : 0x2634D399, 16, e ? LAVENDER : MINT));
+        posBtn.setBackground(glass(this, e ? LAVENDER_SOFT : MINT_SOFT, 16, e ? LAVENDER : MINT));
         posBtn.setTextColor(e ? LAVENDER : MINT);
     }
 

@@ -38,6 +38,8 @@ public class PosSender {
 
     /** ส่วนต่างเวลาเครื่องนี้กับเซิร์ฟเวอร์ — ให้ "นาทีที่แล้ว" ตรงกับเครื่อง POS */
     public static long offset = 0;
+    /** เวลาที่ต่อคลาวด์สำเร็จล่าสุด (มิลลิวินาทีเครื่อง) — ไว้โชว์จุดสถานะบนฟอง */
+    public static long lastOk = 0;
     public static long now() { return System.currentTimeMillis() + offset; }
 
     public static void save(Context c, String url, String shopCode) {
@@ -246,7 +248,7 @@ public class PosSender {
         con.setConnectTimeout(9000);
         con.setReadTimeout(12000);
         con.setRequestMethod("GET");
-        int code = con.getResponseCode();
+        int code = con.getResponseCode(); if (code >= 200 && code < 300) lastOk = System.currentTimeMillis();
         try { long srv = con.getHeaderFieldDate("Date", 0); if (srv > 0) offset = srv - System.currentTimeMillis(); } catch (Exception ignored) {}
         java.io.InputStream in = (code >= 200 && code < 300) ? con.getInputStream() : con.getErrorStream();
         String body = "";
@@ -325,7 +327,7 @@ public class PosSender {
         os.write(o.toString().getBytes("UTF-8"));
         os.close();
 
-        int code = con.getResponseCode();
+        int code = con.getResponseCode(); if (code >= 200 && code < 300) lastOk = System.currentTimeMillis();
         java.io.InputStream rin = (code >= 200 && code < 300) ? con.getInputStream() : con.getErrorStream();
         String resp = "";
         if (rin != null) {
@@ -389,7 +391,7 @@ public class PosSender {
         OutputStream os = con.getOutputStream();
         os.write(o.toString().getBytes("UTF-8"));
         os.close();
-        int code = con.getResponseCode();
+        int code = con.getResponseCode(); if (code >= 200 && code < 300) lastOk = System.currentTimeMillis();
         con.disconnect();
         if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
     }
@@ -422,7 +424,7 @@ public class PosSender {
         con.setRequestProperty("Content-Type", "application/json; charset=utf-8");
         con.setDoOutput(true);
         OutputStream os = con.getOutputStream(); os.write(o.toString().getBytes("UTF-8")); os.close();
-        int code = con.getResponseCode(); con.disconnect();
+        int code = con.getResponseCode(); if (code >= 200 && code < 300) lastOk = System.currentTimeMillis(); con.disconnect();
         if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
         Store.prefs(c).edit().putLong(K_HARVEST_LAST, System.currentTimeMillis()).apply();
     }
@@ -432,7 +434,7 @@ public class PosSender {
         HttpURLConnection con = (HttpURLConnection) new URL(harvestUrl(c)).openConnection();
         con.setConnectTimeout(9000); con.setReadTimeout(12000);
         con.setRequestMethod("GET");
-        int code = con.getResponseCode();
+        int code = con.getResponseCode(); if (code >= 200 && code < 300) lastOk = System.currentTimeMillis();
         java.io.InputStream in = (code >= 200 && code < 300) ? con.getInputStream() : con.getErrorStream();
         String body = "";
         if (in != null) {
@@ -482,7 +484,7 @@ public class PosSender {
         HttpURLConnection con = (HttpURLConnection) new URL(zonesUrl(c)).openConnection();
         con.setConnectTimeout(9000); con.setReadTimeout(12000);
         con.setRequestMethod("GET");
-        int code = con.getResponseCode();
+        int code = con.getResponseCode(); if (code >= 200 && code < 300) lastOk = System.currentTimeMillis();
         java.io.InputStream in = (code >= 200 && code < 300) ? con.getInputStream() : con.getErrorStream();
         String body = "";
         if (in != null) {
@@ -514,7 +516,7 @@ public class PosSender {
         con.setRequestProperty("Content-Type", "application/json; charset=utf-8");
         con.setDoOutput(true);
         OutputStream os = con.getOutputStream(); os.write(patch.toString().getBytes("UTF-8")); os.close();
-        int code = con.getResponseCode(); con.disconnect();
+        int code = con.getResponseCode(); if (code >= 200 && code < 300) lastOk = System.currentTimeMillis(); con.disconnect();
         if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
         Store.prefs(c).edit().putString(K_ZONES, new JSONObject(zones).toString()).apply();
     }

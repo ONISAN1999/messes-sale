@@ -33,13 +33,13 @@ public class MainActivity extends Activity {
         }
 
         ScrollView sv = new ScrollView(this);
-        sv.setBackgroundColor(INK);
+        sv.setBackgroundColor(PANEL_BG);
         sv.setFillViewport(true);
 
         LinearLayout root = col(this);
         root.setPadding(dp(this, 20), dp(this, 30), dp(this, 20), dp(this, 30));
 
-        TextView h1 = text(this, "🦐 Messes Sale  " + ver(this), 24, true, WHITE);
+        TextView h1 = text(this, "🦐 Messes Sale  " + ver(this), 24, true, TXT);
         h1.setGravity(Gravity.CENTER);
         root.addView(h1);
 
@@ -63,11 +63,11 @@ public class MainActivity extends Activity {
 
         TextView note = text(this,
                 "ครั้งแรกต้องกดอนุญาต \"แสดงทับแอปอื่น\" (Display over other apps) แล้วกดเปิดอีกครั้ง",
-                12, false, 0xFFFFE6B8);
+                12, false, AMBER);
         note.setPadding(0, dp(this, 12), 0, dp(this, 22));
         root.addView(note);
 
-        root.addView(text(this, "ตั้งค่าข้อความ", 16, true, WHITE));
+        root.addView(text(this, "ตั้งค่าข้อความ", 16, true, TXT));
 
         SharedPreferences p = prefs();
         bank        = addField(root, "เลขบัญชี", p.getString("bank", "ธ.กสิกรไทย 123-4-56789-0 บังฟาน"));
@@ -104,7 +104,7 @@ public class MainActivity extends Activity {
         root.addView(save, svLp);
 
         // ---- เชื่อมกับเครื่อง POS ----
-        TextView posHead = text(this, "ส่งออเดอร์เข้าเครื่อง POS", 16, true, WHITE);
+        TextView posHead = text(this, "ส่งออเดอร์เข้าเครื่อง POS", 16, true, TXT);
         posHead.setPadding(0, dp(this, 26), 0, dp(this, 4));
         root.addView(posHead);
 
@@ -129,7 +129,7 @@ public class MainActivity extends Activity {
         root.addView(posSave, psLp);
 
         // ---- สำรอง / กู้คืนข้อมูล ----
-        TextView bkHead = text(this, "สำรองข้อมูล", 16, true, WHITE);
+        TextView bkHead = text(this, "สำรองข้อมูล", 16, true, TXT);
         bkHead.setPadding(0, dp(this, 26), 0, dp(this, 4));
         root.addView(bkHead);
 

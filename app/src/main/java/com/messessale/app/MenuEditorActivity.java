@@ -40,13 +40,13 @@ public class MenuEditorActivity extends Activity {
         custom = item.custom;
 
         ScrollView sv = new ScrollView(this);
-        sv.setBackgroundColor(INK);
+        sv.setBackgroundColor(PANEL_BG);
         sv.setFillViewport(true);
 
         LinearLayout root = col(this);
         root.setPadding(dp(this,20), dp(this,28), dp(this,20), dp(this,28));
 
-        root.addView(text(this, isNew ? "เพิ่มเมนูใหม่" : "แก้ไขเมนู", 20, true, WHITE));
+        root.addView(text(this, isNew ? "เพิ่มเมนูใหม่" : "แก้ไขเมนู", 20, true, TXT));
 
         TextView l1 = text(this, "ชื่อเมนู", 12.5f, false, WHITE_DIM);
         l1.setPadding(0, dp(this,18), 0, dp(this,5));
@@ -63,7 +63,7 @@ public class MenuEditorActivity extends Activity {
         priceIn.setText(item.price > 0 ? String.valueOf(item.price) : "");
         root.addView(priceIn, lp(MATCH, WRAP));
 
-        customToggle = text(this, "", 13, true, WHITE);
+        customToggle = text(this, "", 13, true, TXT);
         customToggle.setPadding(dp(this,14), dp(this,13), dp(this,14), dp(this,13));
         refreshCustom();
         Fx.onTap(customToggle, () -> { custom = !custom; refreshCustom(); });
@@ -92,7 +92,8 @@ public class MenuEditorActivity extends Activity {
         root.addView(save, sp);
 
         if (!isNew) {
-            TextView del = button(this, "🗑   ลบเมนูนี้", glass(this, 0x38F43F5E, 14, 0x66F43F5E), 15);
+            TextView del = button(this, "🗑   ลบเมนูนี้", glass(this, 0xFFFEE2E2, 14, RED), 15);
+            del.setTextColor(RED);
             LinearLayout.LayoutParams dp2 = lp(MATCH, WRAP); dp2.topMargin = dp(this,10);
             Fx.onTap(del, () -> {
                 cats.get(catIdx).items.remove(itemIdx);
@@ -123,15 +124,15 @@ public class MenuEditorActivity extends Activity {
         for (int i = 0; i < catChips.size(); i++) {
             boolean on = (i == pickedCat);
             TextView c = catChips.get(i);
-            c.setBackground(on ? glass(this, WHITE, 13, 0) : glass(this, GLASS, 13, STROKE));
-            c.setTextColor(on ? INK : WHITE);
+            c.setBackground(on ? glass(this, ACCENT, 13, 0) : glass(this, SURFACE, 13, LINE));
+            c.setTextColor(on ? WHITE : TXT);
         }
     }
 
     private void refreshCustom() {
         customToggle.setText(custom ? "✓  ราคากำหนดเองตอนขาย" : "○  ราคากำหนดเองตอนขาย");
         customToggle.setBackground(custom
-                ? glass(this, 0x38FF9D6C, 13, 0x66FF9D6C)
+                ? glass(this, ACCENT_SOFT, 13, ACCENT)
                 : glass(this, GLASS, 13, STROKE));
     }
 

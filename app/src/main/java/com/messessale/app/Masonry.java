@@ -58,7 +58,7 @@ public class Masonry {
         r.setPadding(dp(c, 2), dp(c, 12), 0, dp(c, 9));
         android.view.View d = dot(c, color, 7);
         r.addView(d);
-        android.widget.TextView t = text(c, title, 12.5f, true, WHITE);
+        android.widget.TextView t = text(c, title, 12.5f, true, TXT);
         t.setPadding(dp(c, 7), 0, 0, 0);
         r.addView(t);
         return r;

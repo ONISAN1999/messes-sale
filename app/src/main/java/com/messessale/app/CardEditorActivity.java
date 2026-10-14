@@ -38,13 +38,13 @@ public class CardEditorActivity extends Activity {
         card = (index >= 0 && index < cards.size()) ? cards.get(index) : new Store.Card();
 
         ScrollView sv = new ScrollView(this);
-        sv.setBackgroundColor(INK);
+        sv.setBackgroundColor(PANEL_BG);
         sv.setFillViewport(true);
 
         LinearLayout root = col(this);
         root.setPadding(dp(this,20), dp(this,28), dp(this,20), dp(this,28));
 
-        TextView h = text(this, index >= 0 ? "แก้ไขการ์ด" : "เพิ่มการ์ดใหม่", 20, true, WHITE);
+        TextView h = text(this, index >= 0 ? "แก้ไขการ์ด" : "เพิ่มการ์ดใหม่", 20, true, TXT);
         root.addView(h);
 
         TextView l1 = text(this, "ชื่อการ์ด", 12.5f, false, WHITE_DIM);
@@ -80,7 +80,8 @@ public class CardEditorActivity extends Activity {
         root.addView(save, sp);
 
         if (index >= 0) {
-            TextView del = button(this, "🗑   ลบการ์ดนี้", glass(this, 0x38F43F5E, 14, 0x66F43F5E), 15);
+            TextView del = button(this, "🗑   ลบการ์ดนี้", glass(this, 0xFFFEE2E2, 14, RED), 15);
+            del.setTextColor(RED);
             LinearLayout.LayoutParams dp2 = lp(MATCH, WRAP); dp2.topMargin = dp(this,10);
             del.setOnClickListener(v -> {
                 cards.remove(index);
@@ -106,7 +107,7 @@ public class CardEditorActivity extends Activity {
             ImageView iv = new ImageView(this);
             iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
             try { iv.setImageURI(Uri.parse(card.images.get(i))); } catch (Exception ignored) {}
-            iv.setBackground(glass(this, 0xFF2A4A6E, 10, 0));
+            iv.setBackground(glass(this, 0xFFEEF0F3, 10, 0));
             iv.setClipToOutline(true);
             LinearLayout.LayoutParams ip = lp(dp(this,74), dp(this,74));
             ip.rightMargin = dp(this,8);
@@ -118,7 +119,7 @@ public class CardEditorActivity extends Activity {
         }
         TextView add = text(this, "＋", 24, false, WHITE_DIM);
         add.setGravity(Gravity.CENTER);
-        add.setBackground(glass(this, 0x0FFFFFFF, 10, 0x52FFFFFF));
+        add.setBackground(glass(this, 0xFFF1F2F5, 10, 0xFFDFE2E8));
         LinearLayout.LayoutParams ap = lp(dp(this,74), dp(this,74));
         add.setOnClickListener(v -> pickImages());
         imgRow.addView(add, ap);
