@@ -232,11 +232,15 @@ public class PosSender {
     }
 
     /** ดึงสถานะออเดอร์ทั้งหมด — เรียกจาก background thread เท่านั้น */
-    public static java.util.List<OrderStatus> fetchAll(Context c) throws Exception {
+    public static java.util.List<OrderStatus> fetchAll(Context c) throws Exception { return fetchNode(c, "orders"); }
+    /** ออเดอร์ที่ POS เก็บเข้าประวัติแล้ว (ย้อนหลัง 30 วัน) */
+    public static java.util.List<OrderStatus> fetchArchive(Context c) throws Exception { return fetchNode(c, "archive"); }
+
+    private static java.util.List<OrderStatus> fetchNode(Context c, String node) throws Exception {
         java.util.List<OrderStatus> out = new java.util.ArrayList<>();
         String u = dbUrl(c);
         while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
-        String endpoint = u + "/shops/" + shop(c) + "/orders.json";
+        String endpoint = u + "/shops/" + shop(c) + "/" + node + ".json";
 
         HttpURLConnection con = (HttpURLConnection) new URL(endpoint).openConnection();
         con.setConnectTimeout(9000);
