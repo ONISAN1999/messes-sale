@@ -61,6 +61,8 @@ public class BubbleService extends Service {
     private MenuData.Item noteEditFor = null, priceEditFor = null;   // การ์ดที่กำลังเปิดช่องโน้ต/ราคา
     private LinearLayout editorBar;
     private boolean bubbleHidden = false;   // ซ่อนฟองชั่วคราว (แอปยังทำงาน)
+    private boolean bubbleOverdue = false;  // มีออเดอร์ค้างเกิน 50 นาที → ฟองแดงกระพริบ
+    private static final int OVERDUE_MIN = 50;
     private long downAt = 0;                // เวลากดฟอง (ไว้จับกดค้าง)
     private static final int MODE_CARD = 2; // โหมดการ์ดคำพูด (คัดลอกอย่างเดียว)
     private TextView segCard;
@@ -1435,7 +1437,7 @@ public class BubbleService extends Service {
         long cutoff = System.currentTimeMillis() - 12L * 3600000L;   // ดูเฉพาะที่ส่งภายใน 12 ชม.
         for (PosSender.SendLog l : logs)
             if (l.ok && !l.id.isEmpty() && l.at > cutoff && !seen.contains(l.id)) { pending = true; break; }
-        if (!pending) return;
+        if (!pending) { setOverdue(false); return; }
 
         new Thread(() -> {
             List<PosSender.OrderStatus> got;
@@ -1443,6 +1445,14 @@ public class BubbleService extends Service {
             final List<PosSender.OrderStatus> res = got;
             posUi.post(() -> {
                 posOrders = res;
+                // ออเดอร์จากเครื่องนี้ค้างเกิน 50 นาที?
+                boolean overdue = false;
+                for (PosSender.SendLog l : logs) {
+                    if (!l.ok || l.id.isEmpty() || l.at <= cutoff) continue;
+                    for (PosSender.OrderStatus o : res)
+                        if (o.id.equals(l.id) && !o.status.equals("เสร็จ") && o.minAgo() >= OVERDUE_MIN) overdue = true;
+                }
+                setOverdue(overdue);
                 for (PosSender.SendLog l : logs) {
                     if (!l.ok || l.id.isEmpty() || seen.contains(l.id)) continue;
                     for (PosSender.OrderStatus o : res) {
@@ -1456,6 +1466,29 @@ public class BubbleService extends Service {
                 if (panelOpen && filter.equals(F_POS)) rebuildBody();
             });
         }).start();
+    }
+
+    /** ฟองแดงกระพริบช้าๆ เมื่อมีออเดอร์ค้างเกิน 50 นาที */
+    private void setOverdue(boolean on) {
+        if (on == bubbleOverdue || bubbleView == null) return;
+        bubbleOverdue = on;
+        if (on) {
+            GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{0xFFFF4D4D, 0xFFB91C1C});
+            g.setShape(GradientDrawable.OVAL);
+            g.setStroke(dp(this, 2.5f), 0xFFFFFFFF);
+            bubbleView.setBackground(g);
+            android.animation.ObjectAnimator a = android.animation.ObjectAnimator.ofFloat(bubbleView, View.ALPHA, 1f, 0.35f, 1f);
+            a.setDuration(1800);
+            a.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+            a.start();
+            bubbleView.setTag(a);
+            try { Toast.makeText(this, "⚠️ มีออเดอร์ค้างเกิน " + OVERDUE_MIN + " นาที", Toast.LENGTH_LONG).show(); } catch (Exception ignored) {}
+        } else {
+            if (bubbleView.getTag() instanceof android.animation.Animator) ((android.animation.Animator) bubbleView.getTag()).cancel();
+            bubbleView.setTag(null);
+            bubbleView.setAlpha(1f);
+            bubbleView.setBackground(bubbleBg(this));
+        }
     }
 
     /** POS กดเสร็จแล้ว → เสียง + สั่น + แจ้งเตือน + ฟองเด้ง */
