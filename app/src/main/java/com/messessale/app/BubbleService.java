@@ -609,6 +609,7 @@ public class BubbleService extends Service {
                     orderNoInput.getText().toString(), placeInput.getText().toString(),
                     payLine(), place, shipFee);
             copy(msg, "คัดลอกข้อความแล้ว");
+            posUi.postDelayed(() -> { if (panelOpen) closePanel(); }, 150);   // ยุบกลับเป็นฟอง พร้อมวางในแชต
         });
         posBtn = button(this, editingId != null ? "✏️  อัปเดตออเดอร์" : "🧾  ส่งเข้า POS",
                 glass(this, editingId != null ? LAVENDER_SOFT : MINT_SOFT, 16, editingId != null ? LAVENDER : MINT), 14);
@@ -2109,14 +2110,16 @@ public class BubbleService extends Service {
                 }
                 try { Toast.makeText(BubbleService.this, r, Toast.LENGTH_LONG).show(); } catch (Exception ignored) {}
                 if (panelOpen) {
-                    // เด้งไปหน้าสถานะเสมอ — สำเร็จก็ดูว่า POS กดรับยัง ไม่สำเร็จก็เห็นสาเหตุ
-                    filter = F_POS;
-                    refreshFilters();
-                    rebuildBody();
                     if (sent) {
-                        fetchPosOrders();
-                        posUi.removeCallbacks(posPoll);
-                        posUi.postDelayed(posPoll, 6000);
+                        // ส่งสำเร็จ → ยุบกลับเป็นฟองทันที (ฟองจะโชว์สถานะ "รอ POS รับ" เอง)
+                        filter = F_POS;
+                        closePanel();
+                        checkDoneOrders();
+                    } else {
+                        // ไม่สำเร็จ → เด้งไปหน้าสถานะให้เห็นสาเหตุ
+                        filter = F_POS;
+                        refreshFilters();
+                        rebuildBody();
                     }
                 }
             });
