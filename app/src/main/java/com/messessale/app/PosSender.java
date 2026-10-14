@@ -26,9 +26,12 @@ public class PosSender {
         return u.isEmpty() ? DEFAULT_URL : u;
     }
 
+    /** รหัสร้านลับ (ฝังมากับแอป) — กฎ Firebase อนุญาตเฉพาะ path นี้ */
+    public static final String SHOP = "bf-ehiK6Xb7nOheBEIyQb71NBJn";
+
     public static String shop(Context c) {
-        String s = Store.prefs(c).getString(K_SHOP, "bangfan").trim();
-        return s.isEmpty() ? "bangfan" : s;
+        String s = Store.prefs(c).getString(K_SHOP, "").trim();
+        return (s.isEmpty() || s.equals("bangfan")) ? SHOP : s;
     }
 
     public static boolean ready(Context c) { return !dbUrl(c).isEmpty(); }
@@ -188,6 +191,21 @@ public class PosSender {
         public int total = 0;
         public long createdAt = 0;
         public long editedAt = 0, ackEditAt = 0;
+        public String text = "", pay = "", by = "";
+        public int edits = 0;
+
+        /** แปลงเป็นรายการประวัติ (ใช้กับหน้าแก้ไข) */
+        public SendLog asLog() {
+            SendLog l = new SendLog();
+            l.id = id; l.no = no; l.place = place; l.total = total; l.ok = true;
+            l.at = createdAt - offset; l.lines = text; l.pay = pay; l.edits = edits;
+            return l;
+        }
+
+        public String clock() {
+            if (createdAt <= 0) return "";
+            return new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(new java.util.Date(createdAt - offset));
+        }
 
         /** แก้ไขไปแล้ว แต่ POS ยังไม่กดรับทราบ */
         public boolean waitingAck() { return editedAt > 0 && ackEditAt < editedAt; }
@@ -255,6 +273,10 @@ public class PosSender {
             s.createdAt = o.optLong("createdAt", 0);
             s.editedAt = o.optLong("editedAt", 0);
             s.ackEditAt = o.optLong("ackEditAt", 0);
+            s.text = o.optString("text", "");
+            s.pay = o.optString("pay", "");
+            s.by = o.optString("by", "");
+            s.edits = o.optInt("edits", 0);
             out.add(s);
         }
         java.util.Collections.sort(out, (a, b) -> Long.compare(b.createdAt, a.createdAt)); // ใหม่สุดขึ้นก่อน
@@ -275,6 +297,7 @@ public class PosSender {
         o.put("total", total);
         o.put("pay", payInfo == null ? "" : payInfo);
         o.put("status", "ใหม่");
+        o.put("by", "mobile");
         o.put("createdAt", new JSONObject().put(".sv", "timestamp"));   // ให้เซิร์ฟเวอร์ประทับเวลา กันนาฬิกามือถือ/POS ไม่ตรงกัน
 
         JSONArray lines = new JSONArray();
@@ -316,7 +339,7 @@ public class PosSender {
 
     /** แก้ไขออเดอร์เดิม (PATCH id เดิม) — POS จะเด้งเตือนให้กดรับทราบใหม่ */
     public static void update(Context c, String id, String orderNo, String place, String text,
-                              int total, String payInfo, boolean reopen, String prevText) throws Exception {
+                              int total, String payInfo, boolean reopen, String prevText, int edits) throws Exception {
         String u = dbUrl(c);
         while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
         String endpoint = u + "/shops/" + shop(c) + "/orders/" + id + ".json";
@@ -329,6 +352,7 @@ public class PosSender {
         o.put("pay", payInfo == null ? "" : payInfo);
         o.put("editedAt", new JSONObject().put(".sv", "timestamp"));
         o.put("edited", true);
+        o.put("edits", edits);
         if (reopen) o.put("status", "ใหม่");     // เคยเสร็จแล้ว → กลับมาเป็นออเดอร์ใหม่
         // รายการก่อนแก้ — ให้ POS ไฮไลต์ได้ว่าแก้ตรงไหน
         JSONArray prev = new JSONArray();

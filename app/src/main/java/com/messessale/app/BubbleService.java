@@ -72,6 +72,7 @@ public class BubbleService extends Service {
     private TextView segCard;
     private String editingId = null;        // กำลังแก้ไขออเดอร์ที่ส่งไปแล้ว (id บนคลาวด์)
     private String editingPrevText = "";    // ข้อความก่อนแก้ (ให้ POS ไฮไลต์ส่วนที่เปลี่ยน)
+    private int editingEdits = 0;
     private String orderNote = "";          // โน้ตภาพรวมของออเดอร์ (แยกจากโน้ตต่อเมนู)
     private String expandedLogId = null;    // การ์ดประวัติที่กางรายละเอียดอยู่
     private final Runnable harvestTick = new Runnable() {
@@ -694,21 +695,19 @@ public class BubbleService extends Service {
 
     private List<DQ> deliverable() {
         List<DQ> out = new ArrayList<>();
-        long cutoff = System.currentTimeMillis() - 12L * 3600000L;
-        for (PosSender.SendLog l : PosSender.logList(this)) {
-            if (!l.ok || l.id.isEmpty() || l.at <= cutoff) continue;
-            PosSender.OrderStatus st = null;
-            for (PosSender.OrderStatus o : posOrders) if (o.id.equals(l.id)) { st = o; break; }
+        long cutoff = PosSender.now() - 12L * 3600000L;
+        List<PosSender.OrderStatus> list = new ArrayList<>(posOrders);
+        java.util.Collections.sort(list, (x, y) -> Long.compare(x.createdAt, y.createdAt));   // เก่าก่อน
+        for (PosSender.OrderStatus o : list) {
+            if (o.createdAt <= cutoff) continue;
             DQ d = new DQ();
-            d.id = l.id; d.place = l.place.isEmpty() ? "(ไม่ระบุที่อยู่)" : l.place; d.no = l.no; d.total = l.total; d.time = l.clock();
-            d.status = st == null ? "?" : st.status;
+            d.id = o.id; d.place = o.place.isEmpty() ? "(ไม่ระบุที่อยู่)" : o.place; d.no = o.no; d.total = o.total; d.time = o.clock();
+            d.status = o.status;
             String pay = "";
-            for (String ln : l.pay.split("\\n")) { String t = ln.trim(); if (t.startsWith("สถานะ")) { int i = t.indexOf(":"); if (i > 0) pay = t.substring(i + 1).trim(); } }
+            for (String ln : o.pay.split("\n")) { String t = ln.trim(); if (t.startsWith("สถานะ")) { int i = t.indexOf(":"); if (i > 0) pay = t.substring(i + 1).trim(); } }
             d.pay = pay;
             out.add(d);
         }
-        // ล่าสุดส่งก่อนอยู่บน → เรียงตามเวลาส่ง (เก่าก่อน) ให้ดูง่าย
-        java.util.Collections.reverse(out);
         return out;
     }
 
@@ -854,10 +853,15 @@ public class BubbleService extends Service {
             bodyBox.addView(eb, ebl);
         }
 
-        List<PosSender.SendLog> logs = PosSender.logList(this);
+        // รายการจากคลาวด์ (ใช้ได้ทุกเครื่อง) + รายการที่ส่งไม่สำเร็จจากเครื่องนี้
+        List<PosSender.SendLog> logs = new ArrayList<>();
+        for (PosSender.SendLog l : PosSender.logList(this)) if (!l.ok) logs.add(l);
+        List<PosSender.OrderStatus> cloud = new ArrayList<>(posOrders);
+        java.util.Collections.sort(cloud, (x, y) -> Long.compare(y.createdAt, x.createdAt));
+        for (PosSender.OrderStatus o : cloud) logs.add(o.asLog());
 
-        if (logs.isEmpty() && posOrders.isEmpty()) {
-            TextView em = text(this, posLoading ? "กำลังโหลด…" : "ยังไม่เคยส่งออเดอร์เข้า POS", 13, false, WHITE_DIM);
+        if (logs.isEmpty()) {
+            TextView em = text(this, posLoading ? "กำลังโหลด…" : "ยังไม่มีออเดอร์บนคลาวด์", 13, false, WHITE_DIM);
             em.setPadding(dp(this,2), dp(this,12), 0, 0);
             bodyBox.addView(em);
             return;
@@ -866,25 +870,20 @@ public class BubbleService extends Service {
         int waiting = 0, fail = 0;
         for (PosSender.OrderStatus s : posOrders) if (s.status.equals("ใหม่")) waiting++;
         for (PosSender.SendLog l : logs) if (!l.ok) fail++;
-        TextView sum = text(this, "ส่งไปแล้ว " + logs.size() + " ครั้ง  •  รอ POS กดรับ " + waiting
+        TextView sum = text(this, "ทั้งหมด " + posOrders.size() + " ออเดอร์  •  รอ POS กดรับ " + waiting
                 + (fail > 0 ? "  •  ส่งไม่สำเร็จ " + fail : ""), 11.5f, false, WHITE_DIM);
         sum.setPadding(dp(this,2), dp(this,4), 0, dp(this,8));
         bodyBox.addView(sum);
 
-        java.util.HashSet<String> shown = new java.util.HashSet<>();
         for (PosSender.SendLog l : logs) {
-            PosSender.OrderStatus cloud = null;
-            if (!l.id.isEmpty()) {
-                for (PosSender.OrderStatus s : posOrders)
-                    if (s.id.equals(l.id)) { cloud = s; break; }
-            }
-            if (cloud != null) shown.add(cloud.id);
+            PosSender.OrderStatus cloudO = null;
+            if (!l.id.isEmpty()) for (PosSender.OrderStatus s : posOrders) if (s.id.equals(l.id)) { cloudO = s; break; }
 
-            int c = !l.ok ? 0xFFEF4444 : (cloud != null ? cloud.color() : 0xFF94A3B8);
+            int c = !l.ok ? 0xFFEF4444 : (cloudO != null ? cloudO.color() : 0xFF94A3B8);
             String stateTxt;
             if (!l.ok) stateTxt = "ส่งไม่สำเร็จ" + (l.err.isEmpty() ? "" : " — " + l.err);
-            else if (cloud != null) stateTxt = "ส่งสำเร็จ · " + cloud.label();
-            else stateTxt = "ส่งสำเร็จ · ไม่พบบนคลาวด์แล้ว (POS อาจล้างออกไป)";
+            else if (cloudO != null) stateTxt = cloudO.label() + ("pos".equals(cloudO.by) ? " · คีย์ที่ POS" : "");
+            else stateTxt = "ไม่พบบนคลาวด์";
 
             View pc = posCard(c, l.no, l.place, stateTxt,
                     "ส่งเมื่อ " + l.clock() + " น. · " + l.ago()
@@ -902,7 +901,6 @@ public class BubbleService extends Service {
             }
             bodyBox.addView(pc, posCardLp());
 
-            // ---- กล่องรายละเอียดออเดอร์ ----
             if (open && !l.lines.isEmpty()) {
                 LinearLayout box = col(this);
                 box.setBackground(surfaceTint(this, 16, 0x33FFFFFF));
@@ -930,27 +928,12 @@ public class BubbleService extends Service {
             }
         }
 
-        boolean headed = false;
-        for (PosSender.OrderStatus s : posOrders) {
-            if (shown.contains(s.id)) continue;
-            if (!headed) {
-                TextView hh = text(this, "ออเดอร์อื่นบนคลาวด์", 11.5f, true, 0xFF8FA0BD);
-                hh.setPadding(dp(this,2), dp(this,8), 0, dp(this,6));
-                bodyBox.addView(hh);
-                headed = true;
-            }
-            bodyBox.addView(posCard(s.color(), s.no, s.place, s.label(),
-                    "เข้ามา " + s.minAgo() + " นาทีที่แล้ว"
-                            + (s.total > 0 ? "  •  " + s.total + " บาท" : "")),
-                    posCardLp());
-        }
-
         LinearLayout foot = row(this);
         TextView tip = text(this, "🟡 รอ POS กดรับ   🟠 กำลังทำ   🟢 เสร็จแล้ว  (อัปเดตทุก 6 วิ)",
                 10.5f, false, 0xFF8FA0BD);
         foot.addView(tip, lpw(1));
-        if (!logs.isEmpty()) {
-            TextView clr = chip(this, "ล้างประวัติ", false);
+        if (fail > 0) {
+            TextView clr = chip(this, "ล้างที่ส่งไม่สำเร็จ", false);
             Fx.onTap(clr, () -> { PosSender.logClear(this); posBanner = ""; rebuildBody(); });
             foot.addView(clr);
         }
@@ -1570,39 +1553,25 @@ public class BubbleService extends Service {
     /** เช็คทุก 10 วิ ว่าออเดอร์ที่ส่งจากเครื่องนี้ถูก POS กดเสร็จหรือยัง */
     private void checkDoneOrders() {
         if (!PosSender.ready(this)) return;
-        final List<PosSender.SendLog> logs = PosSender.logList(this);
         final java.util.Set<String> seen = PosSender.doneSeen(this);
-        boolean pending = false;
-        long cutoff = System.currentTimeMillis() - 12L * 3600000L;   // ดูเฉพาะที่ส่งภายใน 12 ชม.
-        for (PosSender.SendLog l : logs)
-            if (l.ok && !l.id.isEmpty() && l.at > cutoff && !seen.contains(l.id)) { pending = true; break; }
-        if (!pending) { setOverdue(false); return; }
-
         new Thread(() -> {
             List<PosSender.OrderStatus> got;
             try { got = PosSender.fetchAll(BubbleService.this); } catch (Exception e) { return; }
             final List<PosSender.OrderStatus> res = got;
             posUi.post(() -> {
                 posOrders = res;
-                // ออเดอร์จากเครื่องนี้ค้างเกิน 50 นาที?
+                long cutoff = PosSender.now() - 12L * 3600000L;
                 boolean overdue = false;
-                for (PosSender.SendLog l : logs) {
-                    if (!l.ok || l.id.isEmpty() || l.at <= cutoff) continue;
-                    for (PosSender.OrderStatus o : res)
-                        if (o.id.equals(l.id) && !o.status.equals("เสร็จ") && o.minAgo() >= OVERDUE_MIN) overdue = true;
-                }
-                setOverdue(overdue);
-                for (PosSender.SendLog l : logs) {
-                    if (!l.ok || l.id.isEmpty() || seen.contains(l.id)) continue;
-                    for (PosSender.OrderStatus o : res) {
-                        if (!o.id.equals(l.id)) continue;
-                        if (o.status.equals("เสร็จ")) {
-                            PosSender.markDoneSeen(BubbleService.this, l.id);
-                            notifyDone(l);
-                        }
+                for (PosSender.OrderStatus o : res) {
+                    if (o.createdAt <= cutoff) continue;
+                    if (!o.status.equals("เสร็จ") && o.minAgo() >= OVERDUE_MIN) overdue = true;
+                    if (o.status.equals("เสร็จ") && !seen.contains(o.id) && "mobile".equals(o.by)) {
+                        PosSender.markDoneSeen(BubbleService.this, o.id);
+                        notifyDone(o.asLog());
                     }
                 }
-                if (panelOpen && filter.equals(F_POS)) rebuildBody();
+                setOverdue(overdue);
+                if (panelOpen && (filter.equals(F_POS) || filter.equals(F_ORDERS))) rebuildBody();
             });
         }).start();
     }
@@ -1757,6 +1726,7 @@ public class BubbleService extends Service {
         MsgBuilder.clear(cats);
         shipFee = -1; payChannel = ""; payStatus = ""; orderNote = "";
         editingPrevText = l.lines;
+        editingEdits = l.edits;
         java.util.regex.Pattern item = java.util.regex.Pattern.compile("^(.*?)(?: x(\\d+))? (\\d+) บาท(?: \\((.*)\\))?$");
         java.util.regex.Pattern fee = java.util.regex.Pattern.compile("(\\d+) บาท$");
         int missed = 0;
@@ -1830,7 +1800,7 @@ public class BubbleService extends Service {
             boolean ok = false;
             try {
                 if (editId != null) {
-                    PosSender.update(BubbleService.this, editId, no, dest, msg, total, pay, reopen, editingPrevText);
+                    PosSender.update(BubbleService.this, editId, no, dest, msg, total, pay, reopen, editingPrevText, editingEdits + 1);
                     key = editId;
                     result = "✅ อัปเดตออเดอร์แล้ว — รอ POS กดรับทราบ";
                 } else {
