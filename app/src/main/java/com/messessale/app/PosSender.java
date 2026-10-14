@@ -444,4 +444,74 @@ public class PosSender {
         harvestAt = o.optLong("at", 0);
         harvestAck = o.optLong("ack", 0);
     }
+
+    /* ============ โซนที่อยู่ (ลำดับระยะทาง 1 = ใกล้สุด) เก็บบนคลาวด์ ใช้ร่วมกันทุกเครื่อง ============ */
+    public static final java.util.Map<String, Integer> zones = new java.util.HashMap<>();
+    private static final String K_ZONES = "zones_cache";
+
+    public static String zoneKey(String place) {
+        return place.trim().replaceAll("[.#$\\[\\]/]", "_");
+    }
+
+    public static int zoneOf(Context c, String place) {
+        if (zones.isEmpty()) zonesLoadCache(c);
+        Integer z = zones.get(zoneKey(place));
+        return z == null ? 0 : z;
+    }
+
+    private static void zonesLoadCache(Context c) {
+        try {
+            JSONObject o = new JSONObject(Store.prefs(c).getString(K_ZONES, "{}"));
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext()) { String k = it.next(); zones.put(k, o.optInt(k, 0)); }
+        } catch (Exception ignored) {}
+    }
+
+    private static String zonesUrl(Context c) {
+        String u = dbUrl(c);
+        while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
+        return u + "/shops/" + shop(c) + "/zones.json";
+    }
+
+    /** โหลดโซนจากคลาวด์ — background thread */
+    public static void zonesRefresh(Context c) throws Exception {
+        HttpURLConnection con = (HttpURLConnection) new URL(zonesUrl(c)).openConnection();
+        con.setConnectTimeout(9000); con.setReadTimeout(12000);
+        con.setRequestMethod("GET");
+        int code = con.getResponseCode();
+        java.io.InputStream in = (code >= 200 && code < 300) ? con.getInputStream() : con.getErrorStream();
+        String body = "";
+        if (in != null) {
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[4096]; int n;
+            while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+            in.close(); body = new String(bos.toByteArray(), "UTF-8");
+        }
+        con.disconnect();
+        if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
+        if (body.isEmpty() || body.equals("null")) body = "{}";
+        JSONObject o = new JSONObject(body);
+        zones.clear();
+        java.util.Iterator<String> it = o.keys();
+        while (it.hasNext()) { String k = it.next(); zones.put(k, o.optInt(k, 0)); }
+        Store.prefs(c).edit().putString(K_ZONES, o.toString()).apply();
+    }
+
+    /** ตั้งโซนให้ที่อยู่ (0 = ลบ) — background thread */
+    public static void setZone(Context c, String place, int zone) throws Exception {
+        String k = zoneKey(place);
+        if (zone <= 0) zones.remove(k); else zones.put(k, zone);
+        JSONObject patch = new JSONObject();
+        patch.put(k, zone <= 0 ? JSONObject.NULL : zone);
+        HttpURLConnection con = (HttpURLConnection) new URL(zonesUrl(c)).openConnection();
+        con.setConnectTimeout(9000); con.setReadTimeout(12000);
+        con.setRequestMethod("POST");
+        con.setRequestProperty("X-HTTP-Method-Override", "PATCH");
+        con.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        con.setDoOutput(true);
+        OutputStream os = con.getOutputStream(); os.write(patch.toString().getBytes("UTF-8")); os.close();
+        int code = con.getResponseCode(); con.disconnect();
+        if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
+        Store.prefs(c).edit().putString(K_ZONES, new JSONObject(zones).toString()).apply();
+    }
 }

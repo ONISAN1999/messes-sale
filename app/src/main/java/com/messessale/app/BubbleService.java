@@ -68,7 +68,8 @@ public class BubbleService extends Service {
     private static final int MODE_ORDERS = 3; // โหมดจัดคิวส่งออเดอร์ (ไรเดอร์)
     private static final String F_ORDERS = "คิวส่ง";
     private TextView segOrders;
-    private final List<String> deliverSeq = new ArrayList<>();   // ลำดับการส่ง (id ออเดอร์)
+    private final List<String> deliverSeq = new ArrayList<>();   // ลำดับการส่งที่กดเอง (id ออเดอร์) — ว่าง = ใช้ลำดับโซนอัตโนมัติ
+    private String zoneEditFor = null;                            // การ์ดที่กำลังตั้งโซน
     private TextView segCard;
     private String editingId = null;        // กำลังแก้ไขออเดอร์ที่ส่งไปแล้ว (id บนคลาวด์)
     private String editingPrevText = "";    // ข้อความก่อนแก้ (ให้ POS ไฮไลต์ส่วนที่เปลี่ยน)
@@ -680,6 +681,7 @@ public class BubbleService extends Service {
             List<PosSender.OrderStatus> got = null;
             try { got = PosSender.fetchAll(BubbleService.this); } catch (Exception ignored) {}
             try { PosSender.harvestRefresh(BubbleService.this); } catch (Exception ignored) {}
+            if (filter.equals(F_ORDERS)) { try { PosSender.zonesRefresh(BubbleService.this); } catch (Exception ignored) {} }
             final List<PosSender.OrderStatus> res = got;
             posUi.post(() -> {
                 posLoading = false;
@@ -691,7 +693,7 @@ public class BubbleService extends Service {
 
     /* ================= คิวส่งออเดอร์ (ให้ไรเดอร์ส่งใกล้ → ไกล) ================= */
 
-    private static class DQ { String id, place, no, pay, time; int total; String status; }
+    private static class DQ { String id, place, no, pay, time; int total; String status; int zone; long at; }
 
     private List<DQ> deliverable() {
         List<DQ> out = new ArrayList<>();
@@ -703,12 +705,41 @@ public class BubbleService extends Service {
             DQ d = new DQ();
             d.id = o.id; d.place = o.place.isEmpty() ? "(ไม่ระบุที่อยู่)" : o.place; d.no = o.no; d.total = o.total; d.time = o.clock();
             d.status = o.status;
+            d.zone = PosSender.zoneOf(this, o.place);
+            d.at = o.createdAt;
             String pay = "";
             for (String ln : o.pay.split("\n")) { String t = ln.trim(); if (t.startsWith("สถานะ")) { int i = t.indexOf(":"); if (i > 0) pay = t.substring(i + 1).trim(); } }
             d.pay = pay;
             out.add(d);
         }
         return out;
+    }
+
+    /** ลำดับที่ใช้จริง: ถ้ากดเรียงเองใช้อันนั้น ไม่งั้นเรียงอัตโนมัติตามโซน (ไม่มีโซนไว้ท้าย) เฉพาะออเดอร์ที่ยังไม่เสร็จ */
+    private List<String> effectiveSeq(List<DQ> all) {
+        if (!deliverSeq.isEmpty()) return deliverSeq;
+        List<DQ> act = new ArrayList<>();
+        for (DQ d : all) if (!d.status.equals("เสร็จ")) act.add(d);
+        java.util.Collections.sort(act, (a, b) -> {
+            int za = a.zone <= 0 ? 99 : a.zone, zb = b.zone <= 0 ? 99 : b.zone;
+            if (za != zb) return za - zb;
+            return Long.compare(a.at, b.at);
+        });
+        List<String> out = new ArrayList<>();
+        for (DQ d : act) out.add(d.id);
+        return out;
+    }
+
+    private void saveZone(String place, int zone) {
+        zoneEditFor = null;
+        new Thread(() -> {
+            String m;
+            try { PosSender.setZone(BubbleService.this, place, zone); m = zone > 0 ? "📍 " + place + " = โซน " + zone : "ลบโซนของ " + place + " แล้ว"; }
+            catch (Exception e) { m = "❌ บันทึกโซนไม่สำเร็จ: " + e.getMessage(); }
+            final String mm = m;
+            posUi.post(() -> { try { Toast.makeText(BubbleService.this, mm, Toast.LENGTH_SHORT).show(); } catch (Exception ignored) {} if (panelOpen) rebuildBody(); });
+        }).start();
+        rebuildBody();
     }
 
     private void buildDeliverQueue() {
@@ -718,12 +749,17 @@ public class BubbleService extends Service {
         for (DQ d : all) ids.add(d.id);
         deliverSeq.retainAll(ids);
 
+        final boolean manual = !deliverSeq.isEmpty();
+        final List<String> seqList = effectiveSeq(all);
         LinearLayout h = row(this);
-        h.addView(Masonry.header(this, "คิวส่งออเดอร์ — แตะการ์ดเรียงลำดับใกล้ → ไกล", MINT), lpw(1));
-        TextView reset = chip(this, "รีเซ็ต", false);
-        Fx.onTap(reset, () -> { deliverSeq.clear(); rebuildBody(); });
+        h.addView(Masonry.header(this, manual ? "คิวส่ง — เรียงเอง (แตะการ์ดเพิ่ม/เอาออก)" : "คิวส่ง — เรียงอัตโนมัติตามโซน (กดค้างเพื่อตั้งโซน)", MINT), lpw(1));
+        TextView reset = chip(this, manual ? "กลับอัตโนมัติ" : "รีเซ็ต", false);
+        Fx.onTap(reset, () -> { deliverSeq.clear(); zoneEditFor = null; rebuildBody(); });
         h.addView(reset);
         bodyBox.addView(h, lp(MATCH, WRAP));
+        TextView hint = text(this, "ตั้งโซนครั้งเดียวต่อที่อยู่: โซน 1 = ใกล้ร้านสุด → 9 = ไกลสุด แอปจะเรียงให้เองทุกครั้ง", 10.5f, false, WHITE_DIM);
+        hint.setPadding(dp(this,2), 0, 0, dp(this,6));
+        bodyBox.addView(hint);
 
         if (all.isEmpty()) {
             TextView em = text(this, "ยังไม่มีออเดอร์ที่ส่งไป POS ใน 12 ชม.นี้", 13, false, WHITE_DIM);
@@ -742,13 +778,14 @@ public class BubbleService extends Service {
                 bodyBox.addView(rowv, rl);
             }
             final DQ d = all.get(i);
-            int seq = deliverSeq.indexOf(d.id);
+            int seq = seqList.indexOf(d.id);
             boolean picked = seq >= 0;
             boolean done = d.status.equals("เสร็จ");
 
             LinearLayout card = col(this);
             card.setBackground(surface(this, 16, picked));
-            if (picked) card.setBackground(surfaceTint(this, 16, MINT));
+            if (picked) card.setBackground(surfaceTint(this, 16, manual ? MINT : 0x9934D399));
+            if (zoneEditFor != null && zoneEditFor.equals(d.id)) card.setBackground(surfaceTint(this, 16, AMBER));
             card.setPadding(dp(this,9), dp(this,8), dp(this,9), dp(this,9));
             card.setAlpha(done && !picked ? 0.55f : 1f);
 
@@ -757,15 +794,15 @@ public class BubbleService extends Service {
             TextView pl = text(this, d.place, 12.5f, true, WHITE);
             pl.setMaxLines(2);
             top.addView(pl, lpw(1));
-            TextView badge = text(this, picked ? String.valueOf(seq + 1) : "", 13, true, INK);
+            TextView badge = text(this, picked ? String.valueOf(seq + 1) : "", 13, true, manual ? INK : WHITE);
             badge.setGravity(Gravity.CENTER);
-            badge.setBackground(glass(this, picked ? MINT : 0x00000000, 20, picked ? 0 : 0x55FFFFFF));
+            badge.setBackground(glass(this, picked ? (manual ? MINT : 0x6634D399) : 0x00000000, 20, picked ? (manual ? 0 : MINT) : 0x55FFFFFF));
             int bs = dp(this, 26);
             LinearLayout.LayoutParams bl = lp(bs, bs); bl.leftMargin = dp(this, 4);
             top.addView(badge, bl);
             card.addView(top, lp(MATCH, WRAP));
 
-            TextView meta = text(this, (d.no.isEmpty() ? "" : "#" + d.no + " · ") + d.time + " น.", 10.5f, false, WHITE_DIM);
+            TextView meta = text(this, (d.no.isEmpty() ? "" : "#" + d.no + " · ") + d.time + " น." + (d.zone > 0 ? " · โซน " + d.zone : " · ยังไม่ตั้งโซน"), 10.5f, false, d.zone > 0 ? WHITE_DIM : AMBER);
             meta.setPadding(0, dp(this, 4), 0, 0);
             card.addView(meta);
             String stTxt = done ? "✅ เสร็จ" : d.status.equals("กำลังทำ") ? "🟠 กำลังทำ" : "🟡 รอรับ";
@@ -774,10 +811,37 @@ public class BubbleService extends Service {
             st.setPadding(0, dp(this, 2), 0, 0);
             card.addView(st);
 
+            // ---- ตัวเลือกโซน (กดค้างที่การ์ด) ----
+            if (zoneEditFor != null && zoneEditFor.equals(d.id)) {
+                LinearLayout zr = row(this);
+                for (int z = 1; z <= 9; z++) {
+                    final int zz = z;
+                    TextView zc = text(this, String.valueOf(z), 12, true, d.zone == z ? INK : WHITE);
+                    zc.setGravity(Gravity.CENTER);
+                    zc.setBackground(glass(this, d.zone == z ? AMBER : SURFACE_2, 10, d.zone == z ? 0 : LINE));
+                    int zs = dp(this, 24);
+                    LinearLayout.LayoutParams zl = lp(zs, zs); zl.rightMargin = dp(this, 3);
+                    Fx.onTap(zc, () -> saveZone(d.place, zz));
+                    zr.addView(zc, zl);
+                }
+                android.widget.HorizontalScrollView zsv = new android.widget.HorizontalScrollView(this);
+                zsv.setHorizontalScrollBarEnabled(false);
+                zsv.addView(zr);
+                LinearLayout.LayoutParams zvl = lp(MATCH, WRAP); zvl.topMargin = dp(this, 6);
+                card.addView(zsv, zvl);
+                TextView zx = text(this, d.zone > 0 ? "ลบโซน" : "ปิด", 10.5f, true, WHITE_DIM);
+                zx.setPadding(0, dp(this, 4), 0, 0);
+                Fx.onTap(zx, () -> { if (d.zone > 0) saveZone(d.place, 0); else { zoneEditFor = null; rebuildBody(); } });
+                card.addView(zx);
+            }
+
             Fx.onTap(card, () -> {
+                if (zoneEditFor != null) { zoneEditFor = null; rebuildBody(); return; }
+                if (deliverSeq.isEmpty()) deliverSeq.addAll(seqList);   // เริ่มจากลำดับอัตโนมัติ แล้วค่อยปรับ
                 if (deliverSeq.contains(d.id)) deliverSeq.remove(d.id); else deliverSeq.add(d.id);
                 rebuildBody();
             });
+            Fx.onHold(card, () -> { zoneEditFor = zoneEditFor != null && zoneEditFor.equals(d.id) ? null : d.id; rebuildBody(); });
             LinearLayout.LayoutParams cl = lpw(1);
             if (i % 3 != 0) cl.leftMargin = dp(this, 6);
             rowv.addView(card, cl);
@@ -786,16 +850,17 @@ public class BubbleService extends Service {
         if (rowv != null) for (int k = all.size() % 3; k != 0 && k < 3; k++) { View sp = new View(this); LinearLayout.LayoutParams cl = lpw(1); cl.leftMargin = dp(this, 6); rowv.addView(sp, cl); }
 
         // ---- ปุ่มคัดลอกคิว ----
-        TextView copyQ = button(this, deliverSeq.isEmpty() ? "📋  แตะการ์ดเพื่อเรียงคิวก่อน" : "📋  คัดลอกคิวส่ง (" + deliverSeq.size() + " ออเดอร์) ส่งให้ไรเดอร์",
-                deliverSeq.isEmpty() ? glass(this, SURFACE_2, 16, LINE) : primary(this, 16), 14);
+        TextView copyQ = button(this, seqList.isEmpty() ? "📋  ยังไม่มีออเดอร์ที่ต้องส่ง" : "📋  คัดลอกคิวส่ง (" + seqList.size() + " ออเดอร์" + (manual ? "" : " · อัตโนมัติ") + ") ส่งให้ไรเดอร์",
+                seqList.isEmpty() ? glass(this, SURFACE_2, 16, LINE) : primary(this, 16), 14);
         Fx.onCopyTap(copyQ, () -> {
-            if (deliverSeq.isEmpty()) return;
+            if (seqList.isEmpty()) return;
             StringBuilder sb = new StringBuilder("🛵 คิวส่งออเดอร์ (ใกล้ → ไกล)\n");
             int n = 1;
-            for (String id : deliverSeq) {
+            for (String id : seqList) {
                 for (DQ d : all) if (d.id.equals(id)) {
                     sb.append(n++).append(". ").append(d.place);
                     if (!d.no.isEmpty()) sb.append(" (#").append(d.no).append(")");
+                    if (d.zone > 0) sb.append(" [โซน ").append(d.zone).append("]");
                     sb.append(" · สั่ง ").append(d.time).append(" น.");
                     if (d.total > 0) sb.append(" · ").append(d.total).append(" บาท");
                     if (!d.pay.isEmpty()) sb.append(" · ").append(d.pay);
