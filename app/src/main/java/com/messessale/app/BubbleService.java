@@ -1277,6 +1277,8 @@ public class BubbleService extends Service {
         Fx.onCopyTap(card, () -> {
             if (c.images.isEmpty()) copy(c.text, "คัดลอกข้อความแล้ว");
             else sendCard(c);
+            // โหมด Card: คัดลอกแล้วย่อกลับเป็นฟองทันที พร้อมวางตอบลูกค้า
+            if (mode == MODE_CARD) posUi.postDelayed(() -> { if (panelOpen) closePanel(); }, 150);
         });
         Fx.onHold(card, () -> openCardEditor(idx));
         return card;
