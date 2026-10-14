@@ -65,6 +65,10 @@ public class BubbleService extends Service {
     private static final int OVERDUE_MIN = 50;
     private long downAt = 0;                // เวลากดฟอง (ไว้จับกดค้าง)
     private static final int MODE_CARD = 2; // โหมดการ์ดคำพูด (คัดลอกอย่างเดียว)
+    private static final int MODE_ORDERS = 3; // โหมดจัดคิวส่งออเดอร์ (ไรเดอร์)
+    private static final String F_ORDERS = "คิวส่ง";
+    private TextView segOrders;
+    private final List<String> deliverSeq = new ArrayList<>();   // ลำดับการส่ง (id ออเดอร์)
     private TextView segCard;
     private String editingId = null;        // กำลังแก้ไขออเดอร์ที่ส่งไปแล้ว (id บนคลาวด์)
     private String editingPrevText = "";    // ข้อความก่อนแก้ (ให้ POS ไฮไลต์ส่วนที่เปลี่ยน)
@@ -103,7 +107,7 @@ public class BubbleService extends Service {
     private final android.os.Handler posUi = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable posPoll = new Runnable() {
         @Override public void run() {
-            if (!panelOpen || !filter.equals(F_POS)) return;
+            if (!panelOpen || !(filter.equals(F_POS) || filter.equals(F_ORDERS))) return;
             fetchPosOrders();
             posUi.postDelayed(this, 6000);   // รีเฟรชทุก 6 วิ
         }
@@ -296,16 +300,19 @@ public class BubbleService extends Service {
         segCard = text(this, "Card", 12.5f, true, WHITE);
         segCustomer = text(this, "ตอบลูกค้า", 12.5f, true, WHITE);
         segStaff = text(this, "แจ้งพนักงาน", 12.5f, true, WHITE);
-        for (TextView t : new TextView[]{segCard, segCustomer, segStaff}) {
+        segOrders = text(this, "ออเดอร์", 12.5f, true, WHITE);
+        for (TextView t : new TextView[]{segCard, segCustomer, segStaff, segOrders}) {
             t.setGravity(Gravity.CENTER);
             t.setPadding(0, dp(this,8), 0, dp(this,8));
         }
         Fx.onTap(segCustomer, () -> { mode = MsgBuilder.MODE_CUSTOMER; refreshSeg(); });
         Fx.onTap(segStaff, () -> { mode = MsgBuilder.MODE_STAFF; refreshSeg(); });
         Fx.onTap(segCard, () -> { mode = MODE_CARD; refreshSeg(); });
+        Fx.onTap(segOrders, () -> { mode = MODE_ORDERS; refreshSeg(); });
         seg.addView(segCard, lpw(0.8f));
         seg.addView(segCustomer, lpw(1));
         seg.addView(segStaff, lpw(1));
+        seg.addView(segOrders, lpw(0.9f));
         LinearLayout.LayoutParams segLp = lp(MATCH, WRAP); segLp.topMargin = dp(this, 10);
         panelView.addView(seg, segLp);
 
@@ -597,6 +604,7 @@ public class BubbleService extends Service {
         }
 
         if (filter.equals(F_POS)) { buildPosStatus(); return; }
+        if (filter.equals(F_ORDERS)) { buildDeliverQueue(); return; }
 
         boolean showPhrase = filter.equals("ทั้งหมด") || filter.equals("คำพูด");
         if (showPhrase) {
@@ -675,9 +683,131 @@ public class BubbleService extends Service {
             posUi.post(() -> {
                 posLoading = false;
                 if (res != null) posOrders = res;
-                if (panelOpen && filter.equals(F_POS)) rebuildBody();
+                if (panelOpen && (filter.equals(F_POS) || filter.equals(F_ORDERS))) rebuildBody();
             });
         }).start();
+    }
+
+    /* ================= คิวส่งออเดอร์ (ให้ไรเดอร์ส่งใกล้ → ไกล) ================= */
+
+    private static class DQ { String id, place, no, pay, time; int total; String status; }
+
+    private List<DQ> deliverable() {
+        List<DQ> out = new ArrayList<>();
+        long cutoff = System.currentTimeMillis() - 12L * 3600000L;
+        for (PosSender.SendLog l : PosSender.logList(this)) {
+            if (!l.ok || l.id.isEmpty() || l.at <= cutoff) continue;
+            PosSender.OrderStatus st = null;
+            for (PosSender.OrderStatus o : posOrders) if (o.id.equals(l.id)) { st = o; break; }
+            DQ d = new DQ();
+            d.id = l.id; d.place = l.place.isEmpty() ? "(ไม่ระบุที่อยู่)" : l.place; d.no = l.no; d.total = l.total; d.time = l.clock();
+            d.status = st == null ? "?" : st.status;
+            String pay = "";
+            for (String ln : l.pay.split("\\n")) { String t = ln.trim(); if (t.startsWith("สถานะ")) { int i = t.indexOf(":"); if (i > 0) pay = t.substring(i + 1).trim(); } }
+            d.pay = pay;
+            out.add(d);
+        }
+        // ล่าสุดส่งก่อนอยู่บน → เรียงตามเวลาส่ง (เก่าก่อน) ให้ดูง่าย
+        java.util.Collections.reverse(out);
+        return out;
+    }
+
+    private void buildDeliverQueue() {
+        List<DQ> all = deliverable();
+        // ตัด id ที่หายไปแล้วออกจากคิว
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        for (DQ d : all) ids.add(d.id);
+        deliverSeq.retainAll(ids);
+
+        LinearLayout h = row(this);
+        h.addView(Masonry.header(this, "คิวส่งออเดอร์ — แตะการ์ดเรียงลำดับใกล้ → ไกล", MINT), lpw(1));
+        TextView reset = chip(this, "รีเซ็ต", false);
+        Fx.onTap(reset, () -> { deliverSeq.clear(); rebuildBody(); });
+        h.addView(reset);
+        bodyBox.addView(h, lp(MATCH, WRAP));
+
+        if (all.isEmpty()) {
+            TextView em = text(this, "ยังไม่มีออเดอร์ที่ส่งไป POS ใน 12 ชม.นี้", 13, false, WHITE_DIM);
+            em.setPadding(dp(this,2), dp(this,12), 0, 0);
+            bodyBox.addView(em);
+            return;
+        }
+
+        // ---- ตาราง 3 ต่อแถว ----
+        LinearLayout rowv = null;
+        for (int i = 0; i < all.size(); i++) {
+            if (i % 3 == 0) {
+                rowv = row(this);
+                rowv.setGravity(Gravity.TOP);
+                LinearLayout.LayoutParams rl = lp(MATCH, WRAP); rl.bottomMargin = dp(this, 8);
+                bodyBox.addView(rowv, rl);
+            }
+            final DQ d = all.get(i);
+            int seq = deliverSeq.indexOf(d.id);
+            boolean picked = seq >= 0;
+            boolean done = d.status.equals("เสร็จ");
+
+            LinearLayout card = col(this);
+            card.setBackground(surface(this, 16, picked));
+            if (picked) card.setBackground(surfaceTint(this, 16, MINT));
+            card.setPadding(dp(this,9), dp(this,8), dp(this,9), dp(this,9));
+            card.setAlpha(done && !picked ? 0.55f : 1f);
+
+            LinearLayout top = row(this);
+            top.setGravity(Gravity.TOP);
+            TextView pl = text(this, d.place, 12.5f, true, WHITE);
+            pl.setMaxLines(2);
+            top.addView(pl, lpw(1));
+            TextView badge = text(this, picked ? String.valueOf(seq + 1) : "", 13, true, INK);
+            badge.setGravity(Gravity.CENTER);
+            badge.setBackground(glass(this, picked ? MINT : 0x00000000, 20, picked ? 0 : 0x55FFFFFF));
+            int bs = dp(this, 26);
+            LinearLayout.LayoutParams bl = lp(bs, bs); bl.leftMargin = dp(this, 4);
+            top.addView(badge, bl);
+            card.addView(top, lp(MATCH, WRAP));
+
+            TextView meta = text(this, (d.no.isEmpty() ? "" : "#" + d.no + " · ") + d.time + " น.", 10.5f, false, WHITE_DIM);
+            meta.setPadding(0, dp(this, 4), 0, 0);
+            card.addView(meta);
+            String stTxt = done ? "✅ เสร็จ" : d.status.equals("กำลังทำ") ? "🟠 กำลังทำ" : "🟡 รอรับ";
+            TextView st = text(this, stTxt + (d.pay.isEmpty() ? "" : " · " + d.pay), 10.5f, false,
+                    d.pay.contains("ชำระแล้ว") ? MINT : d.pay.isEmpty() ? WHITE_DIM : AMBER);
+            st.setPadding(0, dp(this, 2), 0, 0);
+            card.addView(st);
+
+            Fx.onTap(card, () -> {
+                if (deliverSeq.contains(d.id)) deliverSeq.remove(d.id); else deliverSeq.add(d.id);
+                rebuildBody();
+            });
+            LinearLayout.LayoutParams cl = lpw(1);
+            if (i % 3 != 0) cl.leftMargin = dp(this, 6);
+            rowv.addView(card, cl);
+        }
+        // เติมช่องว่างให้แถวสุดท้ายเท่ากัน
+        if (rowv != null) for (int k = all.size() % 3; k != 0 && k < 3; k++) { View sp = new View(this); LinearLayout.LayoutParams cl = lpw(1); cl.leftMargin = dp(this, 6); rowv.addView(sp, cl); }
+
+        // ---- ปุ่มคัดลอกคิว ----
+        TextView copyQ = button(this, deliverSeq.isEmpty() ? "📋  แตะการ์ดเพื่อเรียงคิวก่อน" : "📋  คัดลอกคิวส่ง (" + deliverSeq.size() + " ออเดอร์) ส่งให้ไรเดอร์",
+                deliverSeq.isEmpty() ? glass(this, SURFACE_2, 16, LINE) : primary(this, 16), 14);
+        Fx.onCopyTap(copyQ, () -> {
+            if (deliverSeq.isEmpty()) return;
+            StringBuilder sb = new StringBuilder("🛵 คิวส่งออเดอร์ (ใกล้ → ไกล)\n");
+            int n = 1;
+            for (String id : deliverSeq) {
+                for (DQ d : all) if (d.id.equals(id)) {
+                    sb.append(n++).append(". ").append(d.place);
+                    if (!d.no.isEmpty()) sb.append(" (#").append(d.no).append(")");
+                    sb.append(" · สั่ง ").append(d.time).append(" น.");
+                    if (d.total > 0) sb.append(" · ").append(d.total).append(" บาท");
+                    if (!d.pay.isEmpty()) sb.append(" · ").append(d.pay);
+                    sb.append("\n");
+                }
+            }
+            copy(sb.toString().trim(), "คัดลอกคิวส่งแล้ว — วางในแชตไรเดอร์ได้เลย");
+            posUi.postDelayed(() -> { if (panelOpen) closePanel(); }, 150);
+        });
+        LinearLayout.LayoutParams cq = lp(MATCH, WRAP); cq.topMargin = dp(this, 6);
+        bodyBox.addView(copyQ, cq);
     }
 
     /** รายการออเดอร์ที่ส่งไป POS พร้อมสถานะสด */
@@ -1380,9 +1510,14 @@ public class BubbleService extends Service {
     /* ================= refresh ================= */
     private void refreshSeg() {
         boolean card = mode == MODE_CARD;
+        boolean ord = mode == MODE_ORDERS;
         if (segCard != null) {
             segCard.setBackground(card ? glass(this, LAVENDER, 13, 0) : null);
             segCard.setTextColor(WHITE);
+        }
+        if (segOrders != null) {
+            segOrders.setBackground(ord ? glass(this, MINT, 13, 0) : null);
+            segOrders.setTextColor(ord ? INK : WHITE);
         }
         segCustomer.setBackground(mode == MsgBuilder.MODE_CUSTOMER ? glass(this, WHITE, 13, 0) : null);
         segCustomer.setTextColor(mode == MsgBuilder.MODE_CUSTOMER ? INK : WHITE);
@@ -1393,7 +1528,11 @@ public class BubbleService extends Service {
         if (staffPay != null) staffPay.setVisibility(vis);
         // โหมด Card = โชว์เฉพาะการ์ดคำพูด (แตะเพื่อคัดลอก)
         if (card && !filter.equals("คำพูด")) { filter = "คำพูด"; refreshFilters(); rebuildBody(); }
-        else if (!card && filter.equals("คำพูด")) { filter = "ทั้งหมด"; refreshFilters(); rebuildBody(); }
+        else if (ord && !filter.equals(F_ORDERS)) {
+            filter = F_ORDERS; refreshFilters(); rebuildBody();
+            fetchPosOrders(); posUi.removeCallbacks(posPoll); posUi.postDelayed(posPoll, 6000);
+        }
+        else if (!card && !ord && (filter.equals("คำพูด") || filter.equals(F_ORDERS))) { filter = "ทั้งหมด"; refreshFilters(); rebuildBody(); }
     }
 
     private void refreshFilters() {
