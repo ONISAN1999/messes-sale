@@ -444,6 +444,17 @@ public class BubbleService extends Service {
             LinearLayout.LayoutParams upl = lp(WRAP, WRAP); upl.leftMargin = dp(this, 6);
             Fx.onTap(up, this::startUpdate);
             head.addView(up, upl);
+        } else {
+            TextView chk = iconBtn(this, "🔄");
+            ((LinearLayout.LayoutParams) chk.getLayoutParams()).leftMargin = dp(this, 6);
+            Fx.onTap(chk, () -> {
+                Toast.makeText(this, "🔄 กำลังตรวจเวอร์ชันล่าสุด…", Toast.LENGTH_SHORT).show();
+                Updater.check(this, (ok, msg) -> {
+                    Toast.makeText(this, (ok ? "🆕 " : "") + msg, Toast.LENGTH_LONG).show();
+                    if (ok && panelOpen) { closePanel(); openPanel(); }
+                });
+            });
+            head.addView(chk);
         }
         TextView close = iconBtn(this, "✕");
         ((LinearLayout.LayoutParams) close.getLayoutParams()).leftMargin = dp(this, 6);
