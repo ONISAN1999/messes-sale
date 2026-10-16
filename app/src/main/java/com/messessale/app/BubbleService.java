@@ -175,6 +175,19 @@ public class BubbleService extends Service {
         else go.run();
     }
 
+    @Override public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        bodyMaxDp = BODY_TALL;
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        if (bubbleView != null && bubbleParams != null) {
+            int win = dp(this, BUB_WIN);
+            bubbleParams.x = Math.max(0, Math.min(bubbleParams.x, dm.widthPixels - win));
+            bubbleParams.y = Math.max(0, Math.min(bubbleParams.y, dm.heightPixels - win));
+            try { wm.updateViewLayout(bubbleView, bubbleParams); } catch (Exception ignored) {}
+        }
+        if (panelOpen) { closePanel(); openPanel(); }
+    }
+
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         String act = intent == null ? null : intent.getStringExtra("act");
         if ("update".equals(act)) { startUpdate(); return START_STICKY; }
@@ -287,6 +300,8 @@ public class BubbleService extends Service {
         outer.addView(bubbleDot, ndl);
 
         bubbleView = outer;
+        outer.setContentDescription("ฟอง Messes Sale แตะเพื่อเปิดแผงตอบลูกค้า กดค้างเพื่อซ่อน");
+        outer.setOnClickListener(v -> togglePanel());
 
         bubbleParams = new WindowManager.LayoutParams(win, win, wtype(),
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT);
@@ -645,6 +660,24 @@ public class BubbleService extends Service {
         wm.addView(panelView, panelParams);
         panelView.requestFocus();
         panelOpen = true;
+        fitPanel();
+    }
+
+    /** ถ้าแผงสูงเกินจอ (จอเล็ก/ฟอนต์ใหญ่/แนวนอน) ให้ย่อพื้นที่รายการลงจนปุ่มล่างอยู่ในจอ */
+    private int bodyMaxDp = BODY_TALL;
+    private void fitPanel() {
+        if (panelView == null) return;
+        panelView.post(() -> {
+            if (panelView == null || bodyScroll == null) return;
+            int screenH = getResources().getDisplayMetrics().heightPixels;
+            int over = panelView.getHeight() - (screenH - dp(this, 36));
+            int cur = (int) (bodyScroll.getLayoutParams().height / getResources().getDisplayMetrics().density);
+            if (over > 0) {
+                int target = Math.max(110, cur - (int) (over / getResources().getDisplayMetrics().density) - 4);
+                bodyMaxDp = Math.min(bodyMaxDp, target);
+                setBodyHeight(target);
+            }
+        });
     }
 
     /** เปิดหน้าสถานะออเดอร์ที่ส่งเข้า POS */
@@ -681,6 +714,7 @@ public class BubbleService extends Service {
     /** ย่อ/ขยายพื้นที่รายการเมื่อแป้นพิมพ์ขึ้น-ลง */
     private void setBodyHeight(int dpH) {
         if (bodyScroll == null) return;
+        if (dpH > bodyMaxDp) dpH = bodyMaxDp;
         ViewGroup.LayoutParams p = bodyScroll.getLayoutParams();
         int h = dp(this, dpH);
         if (p != null && p.height != h) { p.height = h; bodyScroll.setLayoutParams(p); }
@@ -978,8 +1012,8 @@ public class BubbleService extends Service {
                     TextView zc = text(this, String.valueOf(z), 12, true, d.zone == z ? WHITE : TXT);
                     zc.setGravity(Gravity.CENTER);
                     zc.setBackground(glass(this, d.zone == z ? AMBER : SURFACE, 10, d.zone == z ? 0 : LINE));
-                    int zs = dp(this, 24);
-                    LinearLayout.LayoutParams zl = lp(zs, zs); zl.rightMargin = dp(this, 3);
+                    int zs = dp(this, 38);
+                    LinearLayout.LayoutParams zl = lp(zs, zs); zl.rightMargin = dp(this, 4);
                     Fx.onTap(zc, () -> saveZone(d.place, zz));
                     zr.addView(zc, zl);
                 }
@@ -1442,7 +1476,7 @@ public class BubbleService extends Service {
         card.addView(info, lpw(1));
         TextView retry = button(this, "โหลดกลับมาส่งใหม่", glass(this, RED, 10, 0), 11.5f);
         retry.setPadding(dp(this,10), dp(this,7), dp(this,10), dp(this,7));
-        Fx.onTap(retry, () -> loadForEdit(l));
+        Fx.onTap(retry, () -> { loadForEdit(l); editingId = null; editingLabel = ""; editingPrevText = ""; editingEdits = 0; refreshPosBtn(); });
         card.addView(retry);
         return card;
     }
@@ -1547,7 +1581,7 @@ public class BubbleService extends Service {
         TextView t = text(this, glyph, 16, true, fg);
         t.setGravity(Gravity.CENTER);
         t.setBackground(glass(this, bg, 15, bg == SURFACE ? LINE : 0));
-        int sz = dp(this, 30);
+        int sz = dp(this, 40);
         t.setLayoutParams(new LinearLayout.LayoutParams(sz, sz));
         t.setIncludeFontPadding(false);
         return t;
@@ -1983,6 +2017,7 @@ public class BubbleService extends Service {
 
     /* ================= refresh ================= */
     private void refreshSeg() {
+        posUi.postDelayed(this::fitPanel, 80);
         boolean card = mode == MODE_CARD;
         boolean ord = mode == MODE_ORDERS;
         if (segCard != null) {
@@ -2250,7 +2285,11 @@ public class BubbleService extends Service {
         Toast.makeText(this, missed > 0 ? "โหลดออเดอร์แล้ว (มี " + missed + " รายการที่หาเมนูไม่เจอ)" : "โหลดออเดอร์มาแก้ไขแล้ว", Toast.LENGTH_LONG).show();
     }
 
+    private boolean sending = false;          // กำลังส่งอยู่ — กันกดซ้ำ
+    private String pendingSendId = null;      // id ที่ใช้ส่งครั้งล่าสุดที่ยังไม่สำเร็จ (ส่งใหม่จะทับ id เดิม ไม่เกิดออเดอร์ซ้ำ)
+
     private void sendToPos() {
+        if (sending) { Toast.makeText(this, "กำลังส่งอยู่… รอสักครู่", Toast.LENGTH_SHORT).show(); return; }
         if (!PosSender.ready(this)) {
             Toast.makeText(this, "ยังไม่ได้ตั้งค่าลิงก์ POS — เปิดแอป Messes Sale แล้วใส่ลิงก์ฐานข้อมูลก่อน",
                     Toast.LENGTH_LONG).show();
@@ -2267,12 +2306,16 @@ public class BubbleService extends Service {
         final int total = MsgBuilder.total(cats, shipFee);
         final String pay = payLine();
 
-        final String editId = editingId;
+        final String editId = (editingId == null || editingId.isEmpty()) ? null : editingId;
         boolean reopenTmp = false;
         if (editId != null) for (PosSender.OrderStatus o : posOrders) if (o.id.equals(editId) && o.status.equals("เสร็จ")) reopenTmp = true;
         final boolean reopen = reopenTmp;
 
         Toast.makeText(this, editId != null ? "กำลังอัปเดตออเดอร์…" : "กำลังส่งเข้าเครื่อง POS…", Toast.LENGTH_SHORT).show();
+        sending = true;
+        if (posBtn != null) { posBtn.setEnabled(false); posBtn.setAlpha(0.6f); posBtn.setText("⏳  กำลังส่ง…"); }
+        if (editId == null && pendingSendId == null) pendingSendId = PosSender.newOrderId();
+        final String sendId = pendingSendId;
         new Thread(() -> {
             String result, key = "", err = "";
             boolean ok = false;
@@ -2282,22 +2325,26 @@ public class BubbleService extends Service {
                     key = editId;
                     result = "✅ อัปเดตออเดอร์แล้ว — รอ POS กดรับทราบ";
                 } else {
-                    key = PosSender.send(BubbleService.this, no, dest, msg, total, pay);
+                    key = PosSender.send(BubbleService.this, sendId, no, dest, msg, total, pay);
                     result = "✅ ส่งเข้าเครื่อง POS แล้ว";
                 }
                 ok = true;
             } catch (Exception e) {
                 err = e.getMessage() == null ? e.toString() : e.getMessage();
-                result = (editId != null ? "❌ อัปเดตไม่สำเร็จ: " : "❌ ส่งไม่สำเร็จ: ") + err;
+                String why = err.contains("timeout") || err.contains("Timeout") ? "เน็ตช้า/หลุด — เช็คเน็ตแล้วกดส่งอีกครั้งได้ ระบบกันออเดอร์ซ้ำให้แล้ว" : "เช็คเน็ตแล้วกดส่งอีกครั้ง (ระบบกันออเดอร์ซ้ำให้แล้ว)";
+                result = (editId != null ? "❌ อัปเดตไม่สำเร็จ: " : "❌ ส่งไม่สำเร็จ: ") + why + "\n" + err;
             }
             if (editId != null && ok) PosSender.logEdit(BubbleService.this, editId, no, dest, total, msg, pay);
             else if (editId == null) PosSender.logAdd(BubbleService.this, key, no, dest, total, ok, err, msg, pay);
             final String r = result;
             final boolean sent = ok;
             posUi.post(() -> {
+                sending = false;
+                if (posBtn != null) { posBtn.setEnabled(true); posBtn.setAlpha(1f); refreshPosBtn(); }
                 posBanner = r;
                 posBannerAt = System.currentTimeMillis();
                 if (sent) {
+                    pendingSendId = null;
                     editingId = null; editingLabel = ""; editingPrevText = ""; orderNote = "";
                     MsgBuilder.clear(cats); shipFee = -1;
                     if (staffPay != null) buildPayRows();

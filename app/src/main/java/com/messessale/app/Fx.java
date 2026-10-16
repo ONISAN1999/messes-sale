@@ -62,9 +62,20 @@ public class Fx {
                 .start();
     }
 
+    /** กันกดซ้ำ: แตะ view เดิมซ้ำภายใน 450 ms จะไม่ทำงาน */
+    private static final java.util.WeakHashMap<View, Long> lastTap = new java.util.WeakHashMap<>();
+    private static boolean tooFast(View v) {
+        long now = android.os.SystemClock.uptimeMillis();
+        Long last = lastTap.get(v);
+        if (last != null && now - last < 450) return true;
+        lastTap.put(v, now);
+        return false;
+    }
+
     /** ผูก onClick พร้อมเอฟเฟกต์ครบชุด */
     public static void onTap(View v, Runnable action) {
         v.setOnClickListener(x -> {
+            if (tooFast(v)) return;
             sound(v.getContext());
             haptic(v);
             bounce(v);
@@ -75,6 +86,7 @@ public class Fx {
     /** ผูก onClick แบบ "คัดลอก" — เด้ง + วาบ + สั่น */
     public static void onCopyTap(View v, Runnable action) {
         v.setOnClickListener(x -> {
+            if (tooFast(v)) return;
             sound(v.getContext());
             buzz(v.getContext());
             bounce(v);

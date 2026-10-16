@@ -89,9 +89,9 @@ public class MainActivity extends Activity {
         root.addView(text(this, "ตั้งค่าข้อความ", 16, true, TXT));
 
         SharedPreferences p = prefs();
-        bank        = addField(root, "เลขบัญชี", p.getString("bank", "ธ.กสิกรไทย 123-4-56789-0 บังฟาน"));
+        bank        = addField(root, "เลขบัญชี", p.getString("bank", ""));
         hours       = addField(root, "เวลาเปิด-ปิดร้าน", p.getString("hours", "ร้านเปิด 10:00 - 21:00 น. ทุกวันครับ"));
-        map         = addField(root, "แผนที่ร้าน (ลิงก์)", p.getString("map", "แผนที่ร้าน: https://maps.app.goo.gl/"));
+        map         = addField(root, "แผนที่ร้าน (ลิงก์)", p.getString("map", ""));
         payCustomer = addField(root, "ข้อความท้าย — ตอบลูกค้า", p.getString("payline", "ชำระเงินคนละครึ่งหรือโอนธรรมดาครับ"));
         payStaff    = addField(root, "ข้อความท้าย — แจ้งพนักงาน", p.getString("paystaff", "ลูกค้าโอนจ่ายปกติแล้ว"));
 

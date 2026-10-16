@@ -72,7 +72,8 @@ public class UI {
         TextView t = text(c, glyph, 14, false, TXT);
         t.setGravity(Gravity.CENTER);
         t.setBackground(glass(c, SURFACE_2, 20, 0));
-        int s = dp(c, 36);
+        int s = dp(c, 44);
+        t.setTextSize(16);
         t.setLayoutParams(new LinearLayout.LayoutParams(s, s));
         t.setMinWidth(s); t.setMinHeight(s);
         return t;
@@ -182,6 +183,16 @@ public class UI {
         t.setGravity(Gravity.CENTER);
         t.setPadding(dp(c, 14), dp(c, 13), dp(c, 14), dp(c, 13));
         t.setBackground(bg);
+        t.setMinHeight(dp(c, 48));
+        // พื้นสว่าง/โปร่ง → ใช้ตัวหนังสือเข้มอัตโนมัติ (กันตัวขาวบนพื้นขาว)
+        try {
+            android.content.res.ColorStateList cs = bg.getColor();
+            if (cs != null) {
+                int col = cs.getDefaultColor();
+                double lum = 0.299 * Color.red(col) + 0.587 * Color.green(col) + 0.114 * Color.blue(col);
+                if (Color.alpha(col) < 120 || lum > 170) t.setTextColor(TXT);
+            }
+        } catch (Exception ignored) {}
         return t;
     }
 

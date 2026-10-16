@@ -290,11 +290,28 @@ public class PosSender {
     }
 
     /** ส่งออเดอร์ 1 ใบ — เรียกจาก background thread เท่านั้น */
+    /** สร้าง id แบบ push-id ของ Firebase (8 ตัวแรกเป็นเวลา) — สร้างฝั่งแอปเพื่อให้ส่งซ้ำแล้วได้ออเดอร์เดิม */
+    private static final String PUSH_CHARS = "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
+    public static String newOrderId() {
+        long t = now();
+        char[] ts = new char[8];
+        for (int i = 7; i >= 0; i--) { ts[i] = PUSH_CHARS.charAt((int) (t % 64)); t /= 64; }
+        StringBuilder sb = new StringBuilder(new String(ts));
+        java.util.Random r = new java.util.Random();
+        for (int i = 0; i < 12; i++) sb.append(PUSH_CHARS.charAt(r.nextInt(64)));
+        return sb.toString();
+    }
+
     public static String send(Context c, String orderNo, String place, String text,
+                              int total, String payInfo) throws Exception { return send(c, null, orderNo, place, text, total, payInfo); }
+
+    /** ส่งออเดอร์ใหม่ — ถ้าให้ id มา จะ PUT ทับ id เดิม (กดส่งซ้ำ/ส่งใหม่หลัง timeout ไม่เกิดออเดอร์ซ้ำ) */
+    public static String send(Context c, String id, String orderNo, String place, String text,
                               int total, String payInfo) throws Exception {
         String u = dbUrl(c);
         while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
-        String endpoint = u + "/shops/" + shop(c) + "/orders.json";
+        final boolean put = id != null && !id.isEmpty();
+        String endpoint = u + "/shops/" + shop(c) + "/orders" + (put ? "/" + id : "") + ".json";
 
         JSONObject o = new JSONObject();
         o.put("no", orderNo == null ? "" : orderNo.trim());
@@ -320,7 +337,7 @@ public class PosSender {
         HttpURLConnection con = (HttpURLConnection) new URL(endpoint).openConnection();
         con.setConnectTimeout(9000);
         con.setReadTimeout(12000);
-        con.setRequestMethod("POST");
+        con.setRequestMethod(put ? "PUT" : "POST");
         con.setRequestProperty("Content-Type", "application/json; charset=utf-8");
         con.setDoOutput(true);
         OutputStream os = con.getOutputStream();
@@ -340,6 +357,7 @@ public class PosSender {
         }
         con.disconnect();
         if (code < 200 || code >= 300) throw new Exception("HTTP " + code + " " + resp);
+        if (put) return id;
         try { return new JSONObject(resp).optString("name", ""); } catch (Exception e) { return ""; }
     }
 

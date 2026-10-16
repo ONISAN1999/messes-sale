@@ -69,7 +69,6 @@ public class Store {
 
     private static List<Card> defaultCards(Context c) {
         List<Card> out = new ArrayList<>();
-        out.add(new Card("Map ร้าน", "แผนที่ร้าน: https://maps.app.goo.gl/"));
         out.add(new Card("เมนูกุ้งวันนี้", MsgBuilder.promo()));
         out.add(new Card("เวลาเปิด-ปิด", "ร้านเปิด 10.00 - 00.00 น. ทุกวันครับ"));
         return out;
