@@ -1,1 +1,1 @@
-{"versionCode":27,"versionName":"4.4","build":81,"apk":"https://raw.githubusercontent.com/ONISAN1999/messes-sale/main/dist/MessesSale.apk","notes":"หน้าสถานะ POS ใหม่: การ์ดสถานะ + แถบ 4 ขั้น + รายการเมนูในการ์ด + แยกหมวด รอรับ/กำลังทำ/เสร็จ + ปุ่มคัดลอกข้อความแจ้�","at":"2026-10-15T09:49:27Z"}
+{"versionCode":28,"versionName":"4.5","build":86,"apk":"https://raw.githubusercontent.com/ONISAN1999/messes-sale/main/dist/MessesSale.apk","notes":"QA fix: กันส่งออเดอร์ซ้ำ · แก้โหลดกลับมาส่งใหม่ · แผงไม่สูงเกินจอ · ปุ่มอ่านชัดในหน้าตั้งค่า · ปุ่มใหญ่ขึ้น","at":"2026-10-16T07:25:18Z"}
