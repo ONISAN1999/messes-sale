@@ -34,17 +34,17 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build debug APK
-        run: gradle assembleDebug --no-daemon
+      - name: Build release APK
+        run: gradle assembleRelease --no-daemon
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk MessesSale.apk
+        run: cp app/build/outputs/apk/release/app-release.apk MessesSale.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: messes-sale-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
       - name: Publish release (direct APK link)
@@ -60,7 +60,7 @@ jobs:
           cp MessesSale.apk dist/MessesSale.apk
           VC=$(grep -oP 'versionCode\s+\K\d+' app/build.gradle)
           VN=$(grep -oP 'versionName\s+"\K[^"]+' app/build.gradle)
-          NOTES=$(cat dist/notes.txt 2>/dev/null | head -c 300 | tr '\n' ' ' | sed 's/"/\\"/g')
+          NOTES=$(python3 -c "import json,sys; t=open('dist/notes.txt',encoding='utf-8').read() if __import__('os').path.exists('dist/notes.txt') else ''; print(json.dumps(t.replace(chr(10),' ').strip()[:160], ensure_ascii=False)[1:-1])")
           printf '{"versionCode":%s,"versionName":"%s","build":%s,"apk":"https://raw.githubusercontent.com/ONISAN1999/messes-sale/main/dist/MessesSale.apk","notes":"%s","at":"%s"}\n' "$VC" "$VN" "${{ github.run_number }}" "$NOTES" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > dist/version.json
           cat dist/version.json
           git config user.name "github-actions"
