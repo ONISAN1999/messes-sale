@@ -1449,6 +1449,29 @@ public class BubbleService extends Service {
                 ed.setTextColor(LAVENDER); ed.setPadding(dp(this,8), dp(this,8), dp(this,8), dp(this,8));
                 Fx.onTap(ed, () -> loadForEdit(lg));
                 acts.addView(ed, lpw(1));
+                // กด "เสร็จแล้ว" จากมือถือได้ (เผื่อ POS ลืมกด / ส่งออกไปแล้ว)
+                TextView fin = button(this, "✅ เสร็จแล้ว", glass(this, MINT, 10, 0), 12);
+                fin.setPadding(dp(this,8), dp(this,8), dp(this,8), dp(this,8));
+                LinearLayout.LayoutParams fl = lpw(1); fl.leftMargin = dp(this, 6);
+                Fx.onTap(fin, () -> {
+                    final String pStatus = o.status;
+                    o.status = "เสร็จ";
+                    PosSender.markDoneSeen(BubbleService.this, o.id);   // กดเองไม่ต้องเด้งแจ้งเตือนตัวเอง
+                    rebuildBody(); refreshBubble();
+                    Toast.makeText(this, "⏳ กำลังปิดออเดอร์…", Toast.LENGTH_SHORT).show();
+                    new Thread(() -> {
+                        String err = null;
+                        try { PosSender.setStatus(BubbleService.this, o.id, "เสร็จ"); } catch (Exception e) { err = e.getMessage() == null ? e.toString() : e.getMessage(); }
+                        final String fe = err;
+                        posUi.post(() -> {
+                            if (fe == null) { Toast.makeText(BubbleService.this, "✅ ปิดออเดอร์แล้ว" + (o.no.isEmpty() ? "" : " #" + o.no), Toast.LENGTH_SHORT).show(); }
+                            else { o.status = pStatus; posBanner = "❌ ปิดออเดอร์ไม่สำเร็จ: เช็คเน็ตแล้วกดอีกครั้ง (" + fe + ")"; posBannerAt = System.currentTimeMillis(); }
+                            fetchPosOrders();
+                            if (panelOpen && filter.equals(F_POS)) rebuildBody();
+                        });
+                    }).start();
+                });
+                acts.addView(fin, fl);
             }
             TextView cp = button(this, "📋 คัดลอก", glass(this, SURFACE, 10, LINE), 12);
             cp.setTextColor(TXT); cp.setPadding(dp(this,8), dp(this,8), dp(this,8), dp(this,8));

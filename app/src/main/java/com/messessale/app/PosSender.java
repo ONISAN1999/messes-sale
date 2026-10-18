@@ -414,6 +414,28 @@ public class PosSender {
         if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
     }
 
+    /** เปลี่ยนสถานะออเดอร์จากมือถือ (เช่น กด "เสร็จแล้ว" แทน POS) */
+    public static void setStatus(Context c, String id, String status) throws Exception {
+        String u = dbUrl(c);
+        while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
+        String endpoint = u + "/shops/" + shop(c) + "/orders/" + id + ".json";
+        JSONObject o = new JSONObject();
+        o.put("status", status);
+        HttpURLConnection con = (HttpURLConnection) new URL(endpoint).openConnection();
+        con.setConnectTimeout(9000);
+        con.setReadTimeout(12000);
+        con.setRequestMethod("POST");
+        con.setRequestProperty("X-HTTP-Method-Override", "PATCH");
+        con.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        con.setDoOutput(true);
+        OutputStream os = con.getOutputStream();
+        os.write(o.toString().getBytes("UTF-8"));
+        os.close();
+        int code = con.getResponseCode(); if (code >= 200 && code < 300) lastOk = System.currentTimeMillis();
+        con.disconnect();
+        if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
+    }
+
     /* ============ แจ้งเตือนเก็บกุ้งจากบ่อ ============ */
     public static final String K_HARVEST_EVERY = "harvest_every";   // 0 = ปิด, 30, 60 นาที
     public static final String K_HARVEST_LAST  = "harvest_last";
