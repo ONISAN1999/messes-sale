@@ -1,1 +1,1 @@
-{"versionCode":28,"versionName":"4.5","build":86,"apk":"https://raw.githubusercontent.com/ONISAN1999/messes-sale/main/dist/MessesSale.apk","notes":"QA fix: กันส่งออเดอร์ซ้ำ · แก้โหลดกลับมาส่งใหม่ · แผงไม่สูงเกินจอ · ปุ่มอ่านชัดในหน้าตั้งค่า · ปุ่มใหญ่ขึ้น","at":"2026-10-16T07:25:18Z"}
+{"versionCode":29,"versionName":"4.6","build":89,"apk":"https://raw.githubusercontent.com/ONISAN1999/messes-sale/main/dist/MessesSale.apk","notes":"กดส่งเข้า POS → ป๊อปอัปพรีวิวตรวจรายการก่อนยืนยัน · ส่งแล้วล้างช่อง order/ที่อยู่/โน้ต/ชำระ ให้พร้อมออเดอร์ถัดไป","at":"2026-10-18T07:33:43Z"}
