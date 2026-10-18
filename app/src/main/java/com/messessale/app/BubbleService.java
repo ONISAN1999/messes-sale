@@ -62,7 +62,7 @@ public class BubbleService extends Service {
     private LinearLayout bodyBox, staffRow, staffPay, placeChipRow, previewBox;
     private ScrollView bodyScroll;
     private TextView totalText, segCustomer, segStaff, previewText;
-    private EditText orderNoInput, placeInput, searchInput, shipPlaceField;
+    private EditText orderNoInput, placeInput, searchInput, shipPlaceField, orderNoteInput;
     private String search = "";
     private boolean syncingPlace = false;
     private MenuData.Item noteEditFor = null, priceEditFor = null;   // การ์ดที่กำลังเปิดช่องโน้ต/ราคา
@@ -734,6 +734,7 @@ public class BubbleService extends Service {
 
         // โน้ตภาพรวมออเดอร์ (แยกจากโน้ตต่อเมนู)
         final EditText on = input(this, "📝 โน้ตออเดอร์ เช่น ส่งก่อน 6 โมง / โทรก่อนถึง");
+        orderNoteInput = on;
         on.setText(orderNote);
         on.setTextSize(13);
         on.addTextChangedListener(new TextWatcher() {
@@ -775,8 +776,9 @@ public class BubbleService extends Service {
     }
 
     private void closePanel() {
+        closeConfirm();
         if (panelView != null) { try { wm.removeView(panelView); } catch (Exception ignored) {} panelView = null; }
-        previewBox = null; previewText = null; bodyScroll = null; shipPlaceField = null; editorBar = null; posBtn = null;
+        previewBox = null; previewText = null; bodyScroll = null; shipPlaceField = null; editorBar = null; posBtn = null; orderNoteInput = null;
         noteEditFor = null; priceEditFor = null;
         posUi.removeCallbacks(posPoll);
         panelOpen = false;
@@ -2288,6 +2290,9 @@ public class BubbleService extends Service {
     private boolean sending = false;          // กำลังส่งอยู่ — กันกดซ้ำ
     private String pendingSendId = null;      // id ที่ใช้ส่งครั้งล่าสุดที่ยังไม่สำเร็จ (ส่งใหม่จะทับ id เดิม ไม่เกิดออเดอร์ซ้ำ)
 
+    private View confirmBox = null;
+
+    /** กด "ส่งเข้า POS" → เปิดป๊อปอัปพรีวิวให้ตรวจก่อน แล้วค่อยส่งจริง */
     private void sendToPos() {
         if (sending) { Toast.makeText(this, "กำลังส่งอยู่… รอสักครู่", Toast.LENGTH_SHORT).show(); return; }
         if (!PosSender.ready(this)) {
@@ -2299,6 +2304,93 @@ public class BubbleService extends Service {
             Toast.makeText(this, "ยังไม่ได้เลือกเมนู", Toast.LENGTH_SHORT).show();
             return;
         }
+        if (confirmBox != null) return;
+        final boolean isEdit = editingId != null && !editingId.isEmpty();
+        final String dest = place.isEmpty() ? placeInput.getText().toString().trim() : place;
+        final String no = orderNoInput.getText().toString().trim();
+        final String msg = MsgBuilder.build(cats, MsgBuilder.MODE_STAFF, no, dest, payLine(), place, shipFee);
+        final int total = MsgBuilder.total(cats, shipFee);
+
+        LinearLayout box = col(this);
+        box.setBackground(glass(this, SURFACE, 18, STROKE));
+        box.setPadding(dp(this,16), dp(this,14), dp(this,16), dp(this,14));
+        box.setElevation(dp(this, 20));
+        box.addView(text(this, isEdit ? "✏️ ตรวจสอบก่อนอัปเดตออเดอร์" : "🧾 ตรวจสอบก่อนส่งเข้า POS", 16, true, TXT));
+        TextView hd = text(this, (dest.isEmpty() ? "⚠️ ยังไม่ได้ใส่ที่อยู่ส่ง" : "📍 " + dest) + (no.isEmpty() ? "" : "  ·  order ที่ " + no), 14, true, dest.isEmpty() ? RED : ACCENT);
+        hd.setPadding(0, dp(this, 6), 0, dp(this, 8));
+        box.addView(hd);
+
+        LinearLayout list = col(this);
+        ScrollView sv = new ScrollView(this);
+        sv.addView(list);
+        java.util.regex.Pattern linePat = java.util.regex.Pattern.compile("^(.*?)(?:\\s+[xX×]\\s*(\\d+))?\\s+(\\d[\\d,]*)\\s*บาท(?:\\s*\\((.*)\\))?\\s*$");
+        int n = 0;
+        for (String raw : msg.split("\n")) {
+            String t = raw.trim();
+            if (t.isEmpty() || t.startsWith("order") || t.startsWith("ยอดรวม")) continue;
+            boolean isNote = t.startsWith("หมายเหตุ"), isPay = t.startsWith("ช่องทางชำระ") || t.startsWith("สถานะ");
+            boolean ship = t.startsWith("ค่าส่ง") || t.startsWith("ส่งฟรี");
+            LinearLayout r = row(this);
+            r.setGravity(Gravity.TOP);
+            r.setPadding(0, dp(this, 4), 0, dp(this, 4));
+            if (isNote || isPay) {
+                TextView tv = text(this, (isNote ? "📝 " : "💰 ") + t, 12.5f, isNote, isNote ? 0xFF92400E : MINT);
+                if (isNote) { tv.setBackground(glass(this, AMBER_SOFT, 6, 0)); tv.setPadding(dp(this,8), dp(this,3), dp(this,8), dp(this,3)); }
+                r.addView(tv, lpw(1));
+            } else {
+                String name = t, qty = "1", price = "", note = "";
+                java.util.regex.Matcher m = linePat.matcher(t);
+                if (m.find()) { name = m.group(1); if (m.group(2) != null) qty = m.group(2); price = m.group(3); if (m.group(4) != null) note = m.group(4); }
+                TextView q = text(this, ship ? "🛵" : qty + "×", 14, true, ship ? MUTED : ACCENT);
+                q.setMinWidth(dp(this, 32));
+                r.addView(q);
+                LinearLayout nc = col(this);
+                nc.addView(text(this, name, 14, !ship, ship ? MUTED : TXT));
+                if (!note.isEmpty()) { TextView nt = text(this, "📝 " + note, 11.5f, true, 0xFF92400E); nt.setBackground(glass(this, AMBER_SOFT, 5, 0)); nt.setPadding(dp(this,6), dp(this,1), dp(this,6), dp(this,1)); LinearLayout.LayoutParams ntl = lp(WRAP, WRAP); ntl.topMargin = dp(this, 2); nc.addView(nt, ntl); }
+                r.addView(nc, lpw(1));
+                if (!price.isEmpty()) r.addView(text(this, price, 13.5f, false, WHITE_DIM));
+                if (!ship) n++;
+            }
+            list.addView(r, lp(MATCH, WRAP));
+            View dv = new View(this); dv.setBackgroundColor(LINE); list.addView(dv, lp(MATCH, dp(this, 1)));
+        }
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        box.addView(sv, lp(MATCH, Math.min((int) (dm.heightPixels * 0.42f), dp(this, 340))));
+
+        LinearLayout tot = row(this);
+        tot.setPadding(0, dp(this, 10), 0, dp(this, 10));
+        tot.addView(text(this, "รวม " + n + " รายการ", 13.5f, true, TXT), lpw(1));
+        tot.addView(text(this, total + " บาท", 20, true, MINT));
+        box.addView(tot, lp(MATCH, WRAP));
+
+        LinearLayout btns = row(this);
+        TextView cancel = button(this, "✕ กลับไปแก้", glass(this, SURFACE, 12, STROKE), 14);
+        Fx.onTap(cancel, this::closeConfirm);
+        btns.addView(cancel, lpw(1));
+        TextView ok = button(this, isEdit ? "✅ ยืนยันอัปเดต" : "✅ ยืนยันส่งเข้า POS", glass(this, MINT, 12, 0), 15);
+        LinearLayout.LayoutParams okl = lpw(1.4f); okl.leftMargin = dp(this, 8);
+        Fx.onTap(ok, () -> { closeConfirm(); doSendToPos(); });
+        btns.addView(ok, okl);
+        box.addView(btns, lp(MATCH, WRAP));
+
+        WindowManager.LayoutParams p = new WindowManager.LayoutParams(
+                Math.min(dm.widthPixels - dp(this, 24), dp(this, 420)), WRAP, wtype(),
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, PixelFormat.TRANSLUCENT);
+        p.gravity = Gravity.CENTER;
+        box.setFocusableInTouchMode(true);
+        box.setOnKeyListener((v, code, ev) -> { if (code == KeyEvent.KEYCODE_BACK && ev.getAction() == KeyEvent.ACTION_UP) { closeConfirm(); return true; } return false; });
+        confirmBox = box;
+        wm.addView(box, p);
+        box.requestFocus();
+    }
+
+    private void closeConfirm() {
+        if (confirmBox != null) { try { wm.removeView(confirmBox); } catch (Exception ignored) {} confirmBox = null; }
+    }
+
+    /** ส่งจริง (หลังยืนยันในป๊อปอัป) */
+    private void doSendToPos() {
+        if (sending) return;
         final String no = orderNoInput.getText().toString();
         final String dest = place.isEmpty() ? placeInput.getText().toString() : place;
         final String msg = MsgBuilder.build(cats, MsgBuilder.MODE_STAFF,
@@ -2347,6 +2439,13 @@ public class BubbleService extends Service {
                     pendingSendId = null;
                     editingId = null; editingLabel = ""; editingPrevText = ""; orderNote = "";
                     MsgBuilder.clear(cats); shipFee = -1;
+                    payChannel = ""; payStatus = "";
+                    // ล้างช่องกรอกให้พร้อมรับออเดอร์ถัดไป
+                    try {
+                        if (orderNoInput != null) orderNoInput.setText("");
+                        if (orderNoteInput != null) orderNoteInput.setText("");
+                        setPlace("", null);
+                    } catch (Exception ignored) {}
                     if (staffPay != null) buildPayRows();
                     refreshPosBtn(); refreshTotal();
                 }
