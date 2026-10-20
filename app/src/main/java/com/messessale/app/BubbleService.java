@@ -533,9 +533,7 @@ public class BubbleService extends Service {
         panelView.addView(staffRow, stLp);
 
         // ---- ช่องทาง/สถานะการชำระ (เฉพาะโหมดแจ้งพนักงาน) ----
-        staffPay = col(this);
-        LinearLayout.LayoutParams spLp = lp(MATCH, WRAP); spLp.topMargin = dp(this, 10);
-        panelView.addView(staffPay, spLp);
+        staffPay = col(this);   // จะไปอยู่ในส่วนเลื่อน (ด้านบนรายการเมนู) เพื่อให้ปุ่มล่างไม่ถูกดันหลุดจอ
         buildPayRows();
 
         // ---- filter chips ----
@@ -600,7 +598,11 @@ public class BubbleService extends Service {
         ScrollView sv = new ScrollView(this);
         bodyScroll = sv;
         bodyBox = col(this);
-        sv.addView(bodyBox);
+        LinearLayout scrollCol = col(this);
+        LinearLayout.LayoutParams spLp = lp(MATCH, WRAP); spLp.bottomMargin = dp(this, 10);
+        scrollCol.addView(staffPay, spLp);
+        scrollCol.addView(bodyBox, lp(MATCH, WRAP));
+        sv.addView(scrollCol);
         LinearLayout.LayoutParams svLp = lp(MATCH, dp(this, BODY_TALL));
         svLp.topMargin = dp(this, 11);
         panelView.addView(sv, svLp);
@@ -685,7 +687,7 @@ public class BubbleService extends Service {
             int over = panelView.getHeight() - (screenH - dp(this, 36));
             int cur = (int) (bodyScroll.getLayoutParams().height / getResources().getDisplayMetrics().density);
             if (over > 0) {
-                int target = Math.max(110, cur - (int) (over / getResources().getDisplayMetrics().density) - 4);
+                int target = Math.max(160, cur - (int) (over / getResources().getDisplayMetrics().density) - 4);
                 bodyMaxDp = Math.min(bodyMaxDp, target);
                 setBodyHeight(target);
             }
@@ -824,22 +826,10 @@ public class BubbleService extends Service {
             LinearLayout.LayoutParams cl = lp(WRAP, WRAP); cl.rightMargin = dp(this, 6);
             tr.addView(ch, cl);
         }
-        TextView oth = preChip("⏰ อื่น ๆ", preCustomTime);
-        Fx.onTap(oth, () -> { preCustomTime = true; buildPayRows(); });
+        TextView oth = preChip(preCustomTime ? "⏰ " + preTime : "⏰ เลือกเวลาเอง", preCustomTime);
+        Fx.onTap(oth, this::openTimePicker);
         tr.addView(oth);
         tsv.addView(tr); box.addView(tsv, lp(MATCH, WRAP));
-        if (preCustomTime) {
-            final EditText te = input(this, "พิมพ์เวลา เช่น 15:30");
-            te.setText(preTime);
-            te.addTextChangedListener(new TextWatcher() {
-                @Override public void beforeTextChanged(CharSequence c,int a,int b,int d) {}
-                @Override public void onTextChanged(CharSequence c,int a,int b,int d) { preTime = c.toString().trim(); refreshPreview(); }
-                @Override public void afterTextChanged(Editable e) {}
-            });
-            watchKeyboard(te);
-            LinearLayout.LayoutParams tl = lp(MATCH, WRAP); tl.topMargin = dp(this, 6);
-            box.addView(te, tl);
-        }
 
         // รับยังไง
         box.addView(lbl("รับยังไง"));
@@ -867,7 +857,19 @@ public class BubbleService extends Service {
         LinearLayout.LayoutParams d2l = lp(WRAP, WRAP); d2l.leftMargin = dp(this, 6); mr.addView(d2, d2l);
         box.addView(mr, lp(MATCH, WRAP));
         if (preCustomDep) {
-            final EditText de = input(this, "ยอดมัดจำ (บาท)");
+            LinearLayout qr = row(this);
+            android.widget.HorizontalScrollView qsv = new android.widget.HorizontalScrollView(this); qsv.setHorizontalScrollBarEnabled(false);
+            for (int amt : new int[]{100, 200, 300, 500, 1000}) {
+                final int a = amt;
+                TextView ch = preChip(String.valueOf(a), preDeposit == a);
+                Fx.onTap(ch, () -> { preDeposit = a; buildPayRows(); refreshPreview(); });
+                LinearLayout.LayoutParams cl = lp(WRAP, WRAP); cl.rightMargin = dp(this, 6);
+                qr.addView(ch, cl);
+            }
+            qsv.addView(qr);
+            LinearLayout.LayoutParams ql = lp(MATCH, WRAP); ql.topMargin = dp(this, 6);
+            box.addView(qsv, ql);
+            final EditText de = input(this, "หรือพิมพ์ยอดมัดจำ (บาท)");
             de.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
             if (preDeposit > 0) de.setText(String.valueOf(preDeposit));
             de.addTextChangedListener(new TextWatcher() {
@@ -885,6 +887,75 @@ public class BubbleService extends Service {
         box.addView(sum);
         return box;
     }
+
+    /** ป๊อปอัปเลือกเวลาแบบแตะ ไม่ใช้แป้นพิมพ์: ชั่วโมง + นาที */
+    private View timeBox = null;
+    private void openTimePicker() {
+        if (timeBox != null) return;
+        String[] hm = preTime.split("[:.]");
+        final int[] sel = {17, 0};
+        try { sel[0] = Integer.parseInt(hm[0].trim()); sel[1] = hm.length > 1 ? Integer.parseInt(hm[1].trim()) : 0; } catch (Exception ignored) {}
+        sel[1] = (sel[1] / 15) * 15;
+        final LinearLayout box = col(this);
+        box.setBackground(glass(this, SURFACE, 18, STROKE));
+        box.setPadding(dp(this,16), dp(this,14), dp(this,16), dp(this,14));
+        box.setElevation(dp(this, 20));
+        final TextView head = text(this, "⏰ เลือกเวลานัด", 15, true, TXT);
+        box.addView(head);
+        final TextView big = text(this, "", 30, true, LAVENDER);
+        big.setGravity(Gravity.CENTER); big.setPadding(0, dp(this, 6), 0, dp(this, 6));
+        box.addView(big, lp(MATCH, WRAP));
+        // วงล้อเลื่อน: ชั่วโมง 9–22 · นาทีทีละ 5
+        sel[1] = (sel[1] / 5) * 5;
+        final android.widget.NumberPicker hp = new android.widget.NumberPicker(this);
+        hp.setMinValue(9); hp.setMaxValue(22); hp.setValue(Math.max(9, Math.min(22, sel[0]))); hp.setWrapSelectorWheel(true);
+        hp.setDescendantFocusability(android.widget.NumberPicker.FOCUS_BLOCK_DESCENDANTS);   // ไม่ให้แป้นพิมพ์เด้ง
+        final String[] mv = new String[12];
+        for (int i = 0; i < 12; i++) mv[i] = String.format(java.util.Locale.US, "%02d", i * 5);
+        final android.widget.NumberPicker mp = new android.widget.NumberPicker(this);
+        mp.setMinValue(0); mp.setMaxValue(11); mp.setDisplayedValues(mv); mp.setValue(sel[1] / 5); mp.setWrapSelectorWheel(true);
+        mp.setDescendantFocusability(android.widget.NumberPicker.FOCUS_BLOCK_DESCENDANTS);
+        final Runnable upd = () -> { sel[0] = hp.getValue(); sel[1] = mp.getValue() * 5; big.setText(String.format(java.util.Locale.US, "%02d:%02d", sel[0], sel[1])); };
+        hp.setOnValueChangedListener((pk, o, n) -> upd.run());
+        mp.setOnValueChangedListener((pk, o, n) -> upd.run());
+        upd.run();
+        LinearLayout wheel = row(this);
+        wheel.setGravity(Gravity.CENTER);
+        LinearLayout hc = col(this); hc.setGravity(Gravity.CENTER);
+        hc.addView(text(this, "ชั่วโมง", 11, true, WHITE_DIM)); hc.addView(hp, lp(dp(this, 110), dp(this, 150)));
+        wheel.addView(hc);
+        TextView colon = text(this, ":", 30, true, LAVENDER); colon.setPadding(dp(this, 10), dp(this, 14), dp(this, 10), 0);
+        wheel.addView(colon);
+        LinearLayout mc = col(this); mc.setGravity(Gravity.CENTER);
+        mc.addView(text(this, "นาที", 11, true, WHITE_DIM)); mc.addView(mp, lp(dp(this, 110), dp(this, 150)));
+        wheel.addView(mc);
+        LinearLayout.LayoutParams wl = lp(MATCH, WRAP); wl.topMargin = dp(this, 4);
+        box.addView(wheel, wl);
+        LinearLayout btns = row(this);
+        TextView cancel = button(this, "ยกเลิก", glass(this, SURFACE, 12, STROKE), 14);
+        Fx.onTap(cancel, this::closeTimePicker);
+        btns.addView(cancel, lpw(1));
+        TextView ok = button(this, "✓ ใช้เวลานี้", glass(this, LAVENDER, 12, 0), 15);
+        LinearLayout.LayoutParams okl = lpw(1.5f); okl.leftMargin = dp(this, 8);
+        Fx.onTap(ok, () -> {
+            preTime = String.format(java.util.Locale.US, "%02d:%02d", sel[0], sel[1]);
+            preCustomTime = !java.util.Arrays.asList("10:00", "11:00", "12:00", "13:00", "16:00", "17:00", "18:00", "19:00", "20:00").contains(preTime);
+            closeTimePicker(); buildPayRows(); refreshPreview();
+        });
+        btns.addView(ok, okl);
+        LinearLayout.LayoutParams bl = lp(MATCH, WRAP); bl.topMargin = dp(this, 12);
+        box.addView(btns, bl);
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        WindowManager.LayoutParams p = new WindowManager.LayoutParams(Math.min(dm.widthPixels - dp(this, 24), dp(this, 400)), WRAP, wtype(),
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, PixelFormat.TRANSLUCENT);
+        p.gravity = Gravity.CENTER;
+        box.setFocusableInTouchMode(true);
+        box.setOnKeyListener((v, code, ev) -> { if (code == KeyEvent.KEYCODE_BACK && ev.getAction() == KeyEvent.ACTION_UP) { closeTimePicker(); return true; } return false; });
+        timeBox = box;
+        wm.addView(box, p);
+        box.requestFocus();
+    }
+    private void closeTimePicker() { if (timeBox != null) { try { wm.removeView(timeBox); } catch (Exception ignored) {} timeBox = null; } }
 
     private TextView lbl(String t) { TextView v = text(this, t, 11, true, WHITE_DIM); v.setPadding(0, dp(this, 8), 0, dp(this, 5)); return v; }
     private TextView preChip(String t, boolean on) {
@@ -962,7 +1033,7 @@ public class BubbleService extends Service {
     }
 
     private void closePanel() {
-        closeConfirm();
+        closeConfirm(); closeTimePicker();
         if (panelView != null) { try { wm.removeView(panelView); } catch (Exception ignored) {} panelView = null; }
         previewBox = null; previewText = null; bodyScroll = null; shipPlaceField = null; editorBar = null; posBtn = null; orderNoteInput = null;
         noteEditFor = null; priceEditFor = null;
