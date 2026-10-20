@@ -195,6 +195,12 @@ public class PosSender {
         public long editedAt = 0, ackEditAt = 0;
         public String text = "", pay = "", by = "";
         public int edits = 0;
+        public long preAt = 0; public String preType = ""; public int deposit = 0; public boolean paidFull = false; public int prepMin = 45;
+
+        public boolean isPre() { return status.equals("พรี"); }
+        public boolean isClosed() { return status.equals("เสร็จ") || status.equals("ยกเลิก"); }
+        /** เลยเวลานัดแล้วแต่ยังไม่เสร็จ */
+        public boolean preLate() { return preAt > 0 && !isClosed() && now() > preAt; }
 
         /** แปลงเป็นรายการประวัติ (ใช้กับหน้าแก้ไข) */
         public SendLog asLog() {
@@ -209,6 +215,11 @@ public class PosSender {
             return new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(new java.util.Date(createdAt - offset));
         }
 
+        public String preClock() {
+            if (preAt <= 0) return "";
+            return new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(new java.util.Date(preAt - offset));
+        }
+
         /** แก้ไขไปแล้ว แต่ POS ยังไม่กดรับทราบ */
         public boolean waitingAck() { return editedAt > 0 && ackEditAt < editedAt; }
 
@@ -219,6 +230,7 @@ public class PosSender {
         }
 
         public int color() {
+            if (isPre()) return 0xFF7C3AED;
             if (waitingAck()) return 0xFFA78BFA;                 // ม่วง = แก้ไขแล้ว รอ POS รับทราบ
             if (status.equals("เสร็จ")) return 0xFF22C55E;      // เขียว = POS ทำเสร็จแล้ว
             if (status.equals("กำลังทำ")) return 0xFFF97316;    // ส้ม = POS กดรับแล้ว
@@ -226,6 +238,8 @@ public class PosSender {
         }
 
         public String label() {
+            if (isPre()) return "📅 พรีออเดอร์ · นัด " + preClock();
+            if (status.equals("ยกเลิก")) return "ยกเลิกแล้ว";
             if (waitingAck()) return "แก้ไขแล้ว · รอ POS รับทราบ";
             if (status.equals("เสร็จ")) return "เสร็จแล้ว";
             if (status.equals("กำลังทำ")) return "POS รับแล้ว กำลังทำ";
@@ -283,6 +297,11 @@ public class PosSender {
             s.pay = o.optString("pay", "");
             s.by = o.optString("by", "");
             s.edits = o.optInt("edits", 0);
+            s.preAt = o.optLong("preAt", 0);
+            s.preType = o.optString("preType", "");
+            s.deposit = o.optInt("deposit", 0);
+            s.paidFull = o.optBoolean("paidFull", false);
+            s.prepMin = o.optInt("prepMin", 45);
             out.add(s);
         }
         java.util.Collections.sort(out, (a, b) -> Long.compare(b.createdAt, a.createdAt)); // ใหม่สุดขึ้นก่อน
@@ -300,6 +319,27 @@ public class PosSender {
         java.util.Random r = new java.util.Random();
         for (int i = 0; i < 12; i++) sb.append(PUSH_CHARS.charAt(r.nextInt(64)));
         return sb.toString();
+    }
+
+    /** ข้อมูลสั่งล่วงหน้า (Pre Order) — ตั้งไว้ก่อนเรียก send/update แล้วจะถูกเคลียร์เอง */
+    public static class PreInfo {
+        public long preAt = 0;          // เวลานัด (มิลลิวินาที ตามเวลาเซิร์ฟเวอร์)
+        public String preType = "";     // "รับเอง" / "ส่ง"
+        public int deposit = 0;         // มัดจำ (บาท)
+        public boolean paidFull = false;
+        public int prepMin = 45;        // POS เริ่มเตรียมก่อนนัดกี่นาที
+    }
+    public static PreInfo pendingPre = null;
+
+    private static void putPre(JSONObject o, PreInfo p) throws Exception {
+        if (p == null || p.preAt <= 0) { o.put("preAt", 0); return; }
+        o.put("preAt", p.preAt);
+        o.put("preType", p.preType);
+        o.put("deposit", p.deposit);
+        o.put("paidFull", p.paidFull);
+        o.put("prepMin", p.prepMin);
+        // ถ้าถึงเวลาเตรียมแล้ว (หรือสั่งใกล้เวลา) ให้เข้าคิวปกติทันที
+        if (p.preAt - now() > p.prepMin * 60000L) o.put("status", "พรี");
     }
 
     public static String send(Context c, String orderNo, String place, String text,
@@ -322,6 +362,7 @@ public class PosSender {
         o.put("status", "ใหม่");
         o.put("by", "mobile");
         o.put("createdAt", new JSONObject().put(".sv", "timestamp"));   // ให้เซิร์ฟเวอร์ประทับเวลา กันนาฬิกามือถือ/POS ไม่ตรงกัน
+        putPre(o, pendingPre); pendingPre = null;
 
         JSONArray lines = new JSONArray();
         if (text != null) {
@@ -378,6 +419,7 @@ public class PosSender {
         o.put("edited", true);
         o.put("edits", edits);
         if (reopen) o.put("status", "ใหม่");     // เคยเสร็จแล้ว → กลับมาเป็นออเดอร์ใหม่
+        if (pendingPre != null) { putPre(o, pendingPre); pendingPre = null; }
         // รายการก่อนแก้ — ให้ POS ไฮไลต์ได้ว่าแก้ตรงไหน
         JSONArray prev = new JSONArray();
         if (prevText != null) {
