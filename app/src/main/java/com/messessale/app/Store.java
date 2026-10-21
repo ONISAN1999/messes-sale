@@ -100,7 +100,7 @@ public class Store {
         List<String> places = loadPlaces(c);
         places.remove(n);
         places.add(0, n);
-        while (places.size() > 8) places.remove(places.size() - 1);
+        while (places.size() > 40) places.remove(places.size() - 1);
         savePlaces(c, places);
     }
 

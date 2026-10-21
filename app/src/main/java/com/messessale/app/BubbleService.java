@@ -516,9 +516,11 @@ public class BubbleService extends Service {
         staffRow = row(this);
         orderNoInput = input(this, "order ที่");
         orderNoInput.setInputType(InputType.TYPE_CLASS_NUMBER);
-        final EditText placeStaff = input(this, "จุดส่ง");
+        final EditText placeStaff = input(this, "📍 จุดส่ง (แตะเพื่อเลือก)");
         placeInput = placeStaff;
         placeStaff.setText(place);
+        placeStaff.setFocusable(false); placeStaff.setClickable(true);
+        placeStaff.setOnClickListener(v -> openPlacePicker());
         placeStaff.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s,int a,int b,int c) {}
             @Override public void onTextChanged(CharSequence s,int a,int b,int c) {
@@ -1033,7 +1035,7 @@ public class BubbleService extends Service {
     }
 
     private void closePanel() {
-        closeConfirm(); closeTimePicker();
+        closeConfirm(); closeTimePicker(); closePlacePicker();
         if (panelView != null) { try { wm.removeView(panelView); } catch (Exception ignored) {} panelView = null; }
         previewBox = null; previewText = null; bodyScroll = null; shipPlaceField = null; editorBar = null; posBtn = null; orderNoteInput = null;
         noteEditFor = null; priceEditFor = null;
@@ -2086,6 +2088,147 @@ public class BubbleService extends Service {
     }
 
     /* ---- delivery block ---- */
+    /* ================= ป๊อปอัปเลือกที่อยู่ส่ง (ยึดบนจอ ไม่ให้แป้นพิมพ์บัง) ================= */
+    private View placeBox = null;
+
+    private List<String> allPlaces() {
+        List<String> out = new ArrayList<>(Store.loadPlaces(this));
+        List<PosSender.OrderStatus> cl = new ArrayList<>(posOrders);
+        java.util.Collections.sort(cl, (a, b) -> Long.compare(b.createdAt, a.createdAt));
+        for (PosSender.OrderStatus o : cl) { String p = o.place.trim(); if (!p.isEmpty() && !out.contains(p)) out.add(p); }
+        for (String q : new String[]{"หน้าร้าน", "รับเอง"}) if (!out.contains(q)) out.add(q);
+        return out;
+    }
+
+    private void openPlacePicker() {
+        if (placeBox != null) return;
+        final LinearLayout box = col(this);
+        box.setBackground(glass(this, SURFACE, 18, STROKE));
+        box.setPadding(dp(this,14), dp(this,12), dp(this,14), dp(this,14));
+        box.setElevation(dp(this, 20));
+        LinearLayout hd = row(this);
+        hd.addView(text(this, "📍 เลือกที่อยู่ส่ง", 15, true, TXT), lpw(1));
+        TextView x = iconBtn(this, "✕");
+        Fx.onTap(x, this::closePlacePicker);
+        hd.addView(x);
+        box.addView(hd, lp(MATCH, WRAP));
+
+        final EditText q = input(this, "🔍 พิมพ์ค้นหา / ที่อยู่ใหม่");
+        q.setText(place); q.setSelection(place.length());
+        q.setTextSize(16);
+        q.setSingleLine(true);
+        q.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+        LinearLayout.LayoutParams ql = lp(MATCH, WRAP); ql.topMargin = dp(this, 10);
+        box.addView(q, ql);
+
+        final LinearLayout list = col(this);
+        ScrollView sv = new ScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        sv.addView(list);
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        box.addView(sv, lp(MATCH, (int) (dm.heightPixels * 0.42f)));
+
+        final Runnable refresh = () -> {
+            list.removeAllViews();
+            String t = q.getText().toString().trim(), tl = t.toLowerCase();
+            List<String> all = allPlaces();
+            List<String> hit = new ArrayList<>(), rest = new ArrayList<>();
+            for (String p : all) { if (!tl.isEmpty() && p.toLowerCase().contains(tl)) hit.add(p); else rest.add(p); }
+            if (!t.isEmpty() && !all.contains(t)) {
+                TextView use = button(this, "＋ ใช้ที่อยู่ใหม่ \"" + t + "\"", glass(this, 0xFFFFF8F4, 12, ACCENT), 14);
+                use.setTextColor(ACCENT);
+                Fx.onTap(use, () -> pickPlace(t));
+                LinearLayout.LayoutParams ul = lp(MATCH, WRAP); ul.topMargin = dp(this, 8);
+                list.addView(use, ul);
+            }
+            if (!hit.isEmpty()) {
+                list.addView(lbl("ตรงกับที่พิมพ์ (" + hit.size() + ")"));
+                list.addView(chipFlow(hit, t), lp(MATCH, WRAP));
+            }
+            if (!rest.isEmpty()) {
+                LinearLayout lr = row(this);
+                lr.addView(lbl(tl.isEmpty() ? "ใช้บ่อย / ล่าสุด" : "ที่อยู่อื่น"), lpw(1));
+                TextView tip = text(this, "แตะค้างเพื่อลบ", 10.5f, false, MUTED);
+                lr.addView(tip);
+                list.addView(lr, lp(MATCH, WRAP));
+                list.addView(chipFlow(rest, ""), lp(MATCH, WRAP));
+            }
+            if (all.isEmpty() && t.isEmpty()) {
+                TextView em = text(this, "ยังไม่มีที่อยู่ที่จำไว้ — พิมพ์ด้านบนแล้วกด \"ใช้ที่อยู่ใหม่\"", 12.5f, false, MUTED);
+                em.setPadding(0, dp(this, 10), 0, 0);
+                list.addView(em);
+            }
+        };
+        q.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence c,int a,int b,int d) {}
+            @Override public void onTextChanged(CharSequence c,int a,int b,int d) { refresh.run(); }
+            @Override public void afterTextChanged(Editable e) {}
+        });
+        q.setOnEditorActionListener((tv, a, ev) -> { String t = q.getText().toString().trim(); if (!t.isEmpty()) pickPlace(t); return true; });
+        refresh.run();
+
+        WindowManager.LayoutParams p = new WindowManager.LayoutParams(Math.min(dm.widthPixels - dp(this, 16), dp(this, 440)), WRAP, wtype(),
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, PixelFormat.TRANSLUCENT);
+        p.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+        p.y = dp(this, 12);
+        p.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN | WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE;
+        box.setFocusableInTouchMode(true);
+        box.setOnKeyListener((v, code, ev) -> { if (code == KeyEvent.KEYCODE_BACK && ev.getAction() == KeyEvent.ACTION_UP) { closePlacePicker(); return true; } return false; });
+        placeBox = box;
+        wm.addView(box, p);
+        posUi.postDelayed(() -> {
+            q.requestFocus();
+            android.view.inputmethod.InputMethodManager imm = (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null) imm.showSoftInput(q, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        }, 150);
+    }
+
+    /** ชิปที่อยู่แบบไหลหลายแถว (ไฮไลต์ส่วนที่ตรงกับคำค้น) */
+    private View chipFlow(List<String> items, String hl) {
+        LinearLayout col = col(this);
+        LinearLayout rowv = null;
+        int used = 0, maxW = Math.min(getResources().getDisplayMetrics().widthPixels - dp(this, 16), dp(this, 440)) - dp(this, 28);
+        android.graphics.Paint pt = new android.graphics.Paint(); pt.setTextSize(13 * getResources().getDisplayMetrics().scaledDensity); pt.setFakeBoldText(true);
+        for (final String pl : items) {
+            int w = (int) pt.measureText(pl) + dp(this, 30);
+            if (rowv == null || used + w > maxW) { rowv = row(this); LinearLayout.LayoutParams rl = lp(MATCH, WRAP); rl.topMargin = dp(this, 6); col.addView(rowv, rl); used = 0; }
+            boolean cur = pl.equals(place);
+            TextView c = text(this, pl, 13, true, cur || !hl.isEmpty() ? ACCENT : TXT);
+            if (!hl.isEmpty()) {
+                int i = pl.toLowerCase().indexOf(hl.toLowerCase());
+                if (i >= 0) { android.text.SpannableString ss = new android.text.SpannableString(pl); ss.setSpan(new android.text.style.BackgroundColorSpan(0xFFFFD9C7), i, i + hl.length(), 0); c.setText(ss); }
+            }
+            c.setGravity(Gravity.CENTER);
+            c.setPadding(dp(this, 13), dp(this, 9), dp(this, 13), dp(this, 9));
+            c.setBackground(glass(this, cur || !hl.isEmpty() ? ACCENT_SOFT : SURFACE, 20, cur || !hl.isEmpty() ? ACCENT : LINE));
+            Fx.onTap(c, () -> pickPlace(pl));
+            Fx.onHold(c, () -> { Store.forgetPlace(this, pl); Toast.makeText(this, "ลบ " + pl + " แล้ว", Toast.LENGTH_SHORT).show(); closePlacePicker(); openPlacePicker(); });
+            LinearLayout.LayoutParams cl = lp(WRAP, WRAP); cl.rightMargin = dp(this, 6);
+            rowv.addView(c, cl);
+            used += w + dp(this, 6);
+        }
+        return col;
+    }
+
+    private void pickPlace(String p) {
+        Store.rememberPlace(this, p);
+        setPlace(p, null);
+        closePlacePicker();
+        if (panelOpen) { rebuildBody(); refreshPreview(); }
+        Toast.makeText(this, "📍 " + p, Toast.LENGTH_SHORT).show();
+    }
+
+    private void closePlacePicker() {
+        if (placeBox != null) {
+            try {
+                android.view.inputmethod.InputMethodManager imm = (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                if (imm != null) imm.hideSoftInputFromWindow(placeBox.getWindowToken(), 0);
+            } catch (Exception ignored) {}
+            try { wm.removeView(placeBox); } catch (Exception ignored) {}
+            placeBox = null;
+        }
+    }
+
     private View shipBlock(MenuData.Cat cat) {
         LinearLayout box = col(this);
         box.setBackground(surfaceTint(this, 18, MINT));
@@ -2114,10 +2257,11 @@ public class BubbleService extends Service {
 
         // ช่องส่งที่ไหน + ปุ่ม ✕ ล้าง
         LinearLayout pRow = row(this);
-        final EditText placeField = input(this, "ส่งที่ไหน เช่น Tara");
+        final EditText placeField = input(this, "📍 ส่งที่ไหน (แตะเพื่อเลือก)");
         shipPlaceField = placeField;
         placeField.setText(place);
-        watchKeyboard(placeField);
+        placeField.setFocusable(false); placeField.setClickable(true);
+        placeField.setOnClickListener(v -> openPlacePicker());
         pRow.addView(placeField, lpw(1));
 
         // 💾 ปุ่มจำที่อยู่ — อยู่ติดปุ่ม ✕ มองเห็นเสมอ (เดิมชิป "＋ จำไว้" ถูกดันหลุดขอบเวลามีหอเยอะ)
